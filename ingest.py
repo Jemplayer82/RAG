@@ -20,7 +20,7 @@ import logging
 
 import requests
 from bs4 import BeautifulSoup
-import fitz  # PyMuPDF
+import pdfplumber
 
 import chromadb
 from sentence_transformers import SentenceTransformer
@@ -144,25 +144,26 @@ def ingest_pdf(file_path: str, title: str, url_hint: str = "") -> Tuple[List[Dic
     Returns:
         (chunks, page_count)
     """
-    doc = fitz.open(file_path)
-    pages_text = []
+    try:
+        with pdfplumber.open(file_path) as pdf:
+            pages_text = []
+            for page_num, page in enumerate(pdf.pages, start=1):
+                text = page.extract_text()
+                if text and text.strip():
+                    pages_text.append((page_num, text))
 
-    for page_num, page in enumerate(doc, start=1):
-        text = page.get_text("text")
-        if text.strip():
-            pages_text.append((page_num, text))
+        if not pages_text:
+            logger.warning(f"[PDF] No text extracted from {file_path}")
+            return [], 0
 
-    doc.close()
+        full_text = "\n\n".join(f"[Page {p}]\n{t}" for p, t in pages_text)
+        chunks = chunk_text(full_text, title, "pdf", url_hint)
 
-    if not pages_text:
-        logger.warning(f"[PDF] No text extracted from {file_path}")
-        return [], 0
-
-    full_text = "\n\n".join(f"[Page {p}]\n{t}" for p, t in pages_text)
-    chunks = chunk_text(full_text, title, "pdf", url_hint)
-
-    logger.info(f"[PDF] {title}: {len(pages_text)} pages → {len(chunks)} chunks")
-    return chunks, len(pages_text)
+        logger.info(f"[PDF] {title}: {len(pages_text)} pages → {len(chunks)} chunks")
+        return chunks, len(pages_text)
+    except Exception as e:
+        logger.error(f"[PDF] Error extracting text from {file_path}: {e}")
+        raise ValueError(f"Failed to read PDF: {e}")
 
 
 # ============================================================================

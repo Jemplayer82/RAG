@@ -16,8 +16,9 @@ beautifulsoup4==4.12.2
 # LLM Integration
 ollama==0.6.1
 
-# Document Processing
-PyMuPDF==1.24.0
+# Document Processing (PDF)
+# PyMuPDF has build issues on some systems, use pdfplumber instead
+pdfplumber==0.10.3
 
 # Configuration
 python-dotenv==1.0.1
