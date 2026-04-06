@@ -21,6 +21,7 @@ Routes:
 
 import asyncio
 import logging
+import os
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -47,7 +48,6 @@ from ingest_async import (
     ingest_pdf_async, ingest_txt_async, ingest_url_async,
     QdrantManager
 )
-from settings import get_setting
 
 # ============================================================================
 # LOGGING
@@ -82,7 +82,7 @@ Base.metadata.create_all(bind=engine)
 # AUTH
 # ============================================================================
 
-SECRET_KEY = get_setting("jwt_secret", "change_me_in_production_with_random_string")
+SECRET_KEY = os.getenv("JWT_SECRET", "change_me_in_production_with_random_string")
 ALGORITHM = "HS256"
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -324,7 +324,6 @@ async def delete_source(
 async def get_settings(user: User = Depends(get_current_user)):
     """Get user preferences."""
     return {
-        "llm_model": get_setting("llm_model", LLM_MODEL),
         "user_id": user.id,
         "created_at": user.created_at,
     }
@@ -336,11 +335,7 @@ async def update_settings(
 ):
     """Update user preferences."""
     # In production, store per-user settings in DB
-    # For now, global settings via settings.py
-    if "llm_model" in data:
-        from settings import save_setting
-        save_setting("llm_model", data["llm_model"])
-        logger.info(f"[USER {user.id}] Updated LLM model: {data['llm_model']}")
+    # For now, using global settings via settings.py
     return {"status": "updated"}
 
 # ============================================================================
@@ -372,7 +367,6 @@ async def http_exception_handler(request, exc):
 async def startup():
     logger.info("RAG FastAPI server starting...")
     logger.info(f"Ollama: {OLLAMA_BASE_URL}")
-    logger.info(f"LLM Model: {get_setting('llm_model', LLM_MODEL)}")
     logger.info(f"Cache Root: {CACHE_ROOT}")
 
 @app.on_event("shutdown")

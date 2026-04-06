@@ -39,7 +39,7 @@ from config import (
     CHROMA_DIR, CHROMA_COLLECTION, RAW_DIR,
     EMBED_MODEL, OLLAMA_BASE_URL, LLM_MODEL, CACHE_ROOT, DEBUG
 )
-from settings import load_settings, get_setting, save_setting, save_settings
+from settings import load_settings, save_settings
 
 # ============================================================================
 # SETUP
@@ -356,7 +356,6 @@ def api_get_settings():
     try:
         current = load_settings()
         return jsonify({
-            "llm_model": current.get("llm_model", LLM_MODEL),
             "data_dir": current.get("data_dir", str(CACHE_ROOT)),
         })
     except Exception as e:
@@ -369,15 +368,12 @@ def api_save_settings():
     """
     Save one or more settings.
 
-    Request JSON: { "llm_model": "...", "data_dir": "..." }
+    Request JSON: { "data_dir": "..." }
     data_dir changes require an app restart to take effect.
     """
     try:
         data = request.get_json(silent=True) or {}
         updates = {}
-
-        if "llm_model" in data:
-            updates["llm_model"] = data["llm_model"].strip()
 
         if "data_dir" in data:
             updates["data_dir"] = data["data_dir"].strip()
@@ -396,30 +392,6 @@ def api_save_settings():
     except Exception as e:
         logger.error(f"Save settings error: {e}")
         return jsonify({"error": str(e)}), 500
-
-
-@app.route("/api/ollama/models", methods=["GET"])
-def api_ollama_models():
-    """
-    List models currently available in the running Ollama instance.
-    Also returns the currently active model from settings.
-    """
-    try:
-        import requests as req
-        resp = req.get(f"{OLLAMA_BASE_URL}/api/tags", timeout=5)
-        resp.raise_for_status()
-        data = resp.json()
-        models = [m["name"] for m in data.get("models", [])]
-        current = get_setting("llm_model", LLM_MODEL)
-        return jsonify({"models": models, "current": current})
-    except Exception as e:
-        logger.warning(f"Ollama model list error: {e}")
-        current = get_setting("llm_model", LLM_MODEL)
-        return jsonify({
-            "models": [],
-            "current": current,
-            "error": f"Could not reach Ollama: {e}"
-        })
 
 
 # ============================================================================

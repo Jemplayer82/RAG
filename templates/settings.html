@@ -5,47 +5,7 @@
 {% block content %}
 <div class="py-4" style="max-width: 700px;">
     <h2><i class="bi bi-gear"></i> Settings</h2>
-    <p class="text-muted">Configure the LLM model and local storage location.</p>
-
-    <!-- LLM Model -->
-    <div class="card mb-4">
-        <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
-            <h5 class="mb-0"><i class="bi bi-cpu"></i> LLM Model</h5>
-            <button class="btn btn-sm btn-outline-light" id="refreshModelsBtn" title="Refresh model list from Ollama">
-                <i class="bi bi-arrow-repeat"></i> Refresh
-            </button>
-        </div>
-        <div class="card-body">
-            <p class="text-muted small">Select from models currently available in your running Ollama instance. Changes take effect immediately — no restart needed.</p>
-
-            <div id="ollamaError" class="alert alert-warning" style="display: none;">
-                <i class="bi bi-exclamation-triangle"></i>
-                <span id="ollamaErrorText">Could not connect to Ollama.</span>
-                Make sure Ollama is running: <code>ollama serve</code>
-            </div>
-
-            <div class="mb-3">
-                <label for="modelSelect" class="form-label fw-bold">Active Model</label>
-                <div class="input-group">
-                    <select class="form-select" id="modelSelect">
-                        <option value="">Loading models...</option>
-                    </select>
-                    <button class="btn btn-success" id="saveModelBtn">
-                        <i class="bi bi-check-lg"></i> Save
-                    </button>
-                </div>
-                <div class="form-text" id="currentModelText"></div>
-            </div>
-
-            <div id="modelSaveStatus" style="display: none;"></div>
-
-            <div class="mt-3">
-                <p class="text-muted small mb-1">To add a model to Ollama, run:</p>
-                <code>ollama pull &lt;model-name&gt;</code>
-                <p class="text-muted small mt-2 mb-0">Popular options: <code>mistral-small3.1</code>, <code>llama3.2</code>, <code>gemma3</code>, <code>phi4</code>, <code>qwen2.5</code></p>
-            </div>
-        </div>
-    </div>
+    <p class="text-muted">Configure local storage location.</p>
 
     <!-- Storage Location -->
     <div class="card mb-4">
@@ -89,11 +49,9 @@
 
 {% block scripts %}
 <script>
-let availableModels = [];
-
-// ---- Load current settings + models on page load ----
+// ---- Load current settings on page load ----
 async function init() {
-    await Promise.all([loadModels(), loadSettings()]);
+    await loadSettings();
 }
 
 async function loadSettings() {
@@ -106,93 +64,6 @@ async function loadSettings() {
         console.error('Error loading settings:', err);
     }
 }
-
-async function loadModels() {
-    try {
-        const resp = await fetch('/api/ollama/models');
-        const data = await resp.json();
-
-        if (data.error) {
-            document.getElementById('ollamaError').style.display = 'block';
-            document.getElementById('ollamaErrorText').textContent = data.error;
-        } else {
-            document.getElementById('ollamaError').style.display = 'none';
-        }
-
-        availableModels = data.models || [];
-        const select = document.getElementById('modelSelect');
-        select.innerHTML = '';
-
-        if (availableModels.length === 0) {
-            const opt = document.createElement('option');
-            opt.value = '';
-            opt.textContent = 'No models found — pull one with ollama pull <name>';
-            select.appendChild(opt);
-        } else {
-            availableModels.forEach(name => {
-                const opt = document.createElement('option');
-                opt.value = name;
-                opt.textContent = name;
-                if (name === data.current) opt.selected = true;
-                select.appendChild(opt);
-            });
-        }
-
-        // If current model isn't in the list (e.g. set manually via .env), add it
-        if (data.current && !availableModels.includes(data.current)) {
-            const opt = document.createElement('option');
-            opt.value = data.current;
-            opt.textContent = `${data.current} (current, not in Ollama list)`;
-            opt.selected = true;
-            select.insertBefore(opt, select.firstChild);
-        }
-
-        document.getElementById('currentModelText').textContent =
-            data.current ? `Currently active: ${data.current}` : '';
-
-    } catch (err) {
-        console.error('Error loading models:', err);
-        document.getElementById('ollamaError').style.display = 'block';
-        document.getElementById('ollamaErrorText').textContent = `Fetch error: ${err.message}`;
-    }
-}
-
-// ---- Refresh button ----
-document.getElementById('refreshModelsBtn').addEventListener('click', async () => {
-    document.getElementById('refreshModelsBtn').disabled = true;
-    await loadModels();
-    document.getElementById('refreshModelsBtn').disabled = false;
-});
-
-// ---- Save model ----
-document.getElementById('saveModelBtn').addEventListener('click', async () => {
-    const model = document.getElementById('modelSelect').value;
-    if (!model) return;
-
-    try {
-        const resp = await fetch('/api/settings', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ llm_model: model })
-        });
-        const data = await resp.json();
-
-        const el = document.getElementById('modelSaveStatus');
-        if (!resp.ok) {
-            el.innerHTML = `<div class="alert alert-danger mt-2">Error: ${data.error}</div>`;
-        } else {
-            el.innerHTML = `<div class="alert alert-success mt-2">✓ Model set to <strong>${model}</strong>. Active immediately.</div>`;
-            document.getElementById('currentModelText').textContent = `Currently active: ${model}`;
-        }
-        el.style.display = 'block';
-        setTimeout(() => { el.style.display = 'none'; }, 4000);
-
-    } catch (err) {
-        document.getElementById('modelSaveStatus').innerHTML =
-            `<div class="alert alert-danger mt-2">Error: ${err.message}</div>`;
-        document.getElementById('modelSaveStatus').style.display = 'block';
-    }
-});
 
 // ---- Save data dir ----
 document.getElementById('saveDirBtn').addEventListener('click', async () => {

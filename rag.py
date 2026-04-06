@@ -29,7 +29,6 @@ from config import (
     RAG_PROMPT_TEMPLATE,
     DEBUG
 )
-from settings import get_setting
 
 logging.basicConfig(level=logging.DEBUG if DEBUG else logging.INFO)
 logger = logging.getLogger(__name__)
@@ -148,8 +147,7 @@ def retrieve_sources(question: str, k: int = TOP_K) -> List[Dict]:
 
 def _call_ollama_llm(prompt: str) -> str:
     """
-    Call the active LLM via Ollama.
-    Model is read fresh from settings.json each call so changes take effect immediately.
+    Call the LLM via Ollama.
 
     Args:
         prompt: Full prompt text
@@ -157,8 +155,7 @@ def _call_ollama_llm(prompt: str) -> str:
     Returns:
         Generated response string
     """
-    # Read model at call time so UI changes take effect without restart
-    active_model = get_setting("llm_model", LLM_MODEL)
+    active_model = LLM_MODEL
     try:
         response = requests.post(
             f"{OLLAMA_BASE_URL}/api/generate",
@@ -210,7 +207,7 @@ def query(question: str, chat_history: Optional[List[Dict]] = None) -> Dict:
         return {
             "answer": "I could not find relevant documents to answer your question. Please add documents via the Add Sources page and try again.",
             "sources": [],
-            "metadata": {"retrieval_count": 0, "llm": LLM_MODEL, "embedder": EMBED_MODEL}
+            "metadata": {"retrieval_count": 0, "embedder": EMBED_MODEL}
         }
 
     sources_text = ""
@@ -236,8 +233,6 @@ def query(question: str, chat_history: Optional[List[Dict]] = None) -> Dict:
         question=question
     )
 
-    active_model = get_setting("llm_model", LLM_MODEL)
-    logger.info(f"Calling {active_model} via Ollama...")
     answer = _call_ollama_llm(prompt)
 
     return {
@@ -245,7 +240,6 @@ def query(question: str, chat_history: Optional[List[Dict]] = None) -> Dict:
         "sources": source_citations,
         "metadata": {
             "retrieval_count": len(sources),
-            "llm": active_model,
             "embedder": EMBED_MODEL,
             "question": question,
         }
