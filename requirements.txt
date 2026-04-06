@@ -1,10 +1,39 @@
+# Web Framework
 flask==3.0.0
+werkzeug==3.0.1
+
+# Vector Database & Embeddings
 chromadb==0.4.24
 sentence-transformers==3.0.1
+
+# Retrieval & Ranking
 rank-bm25==0.2.2
+
+# HTTP & Web Scraping
 requests==2.31.0
 beautifulsoup4==4.12.2
+
+# LLM Integration
 ollama==0.6.1
-numpy<2.0
+
+# Document Processing
 PyMuPDF==1.24.0
+
+# Configuration
 python-dotenv==1.0.1
+
+# Numerical Computing
+numpy<2.0
+
+# Optional: For future FastAPI migration
+# fastapi==0.104.0
+# uvicorn==0.24.0
+# sqlalchemy==2.0.0
+# psycopg2-binary==2.9.0
+# qdrant-client==2.6.0
+# redis==5.0.0
+# pydantic==2.5.0
+# pyjwt==2.8.0
+# passlib==1.7.4
+# aiofiles==23.2.0
+# rq==1.14.0
