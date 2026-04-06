@@ -1,0 +1,264 @@
+{% extends "base.html" %}
+
+{% block title %}Add Sources - RAG Assistant{% endblock %}
+
+{% block content %}
+<div class="py-4">
+    <h2><i class="bi bi-plus-square"></i> Add Sources</h2>
+    <p class="text-muted">Upload PDF or text files, or add a web URL to your knowledge base.</p>
+
+    <!-- Tabs -->
+    <ul class="nav nav-tabs mb-4" id="uploadTabs" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="file-tab" data-bs-toggle="tab" data-bs-target="#file-pane" type="button" role="tab">
+                <i class="bi bi-file-earmark-arrow-up"></i> Upload File
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="url-tab" data-bs-toggle="tab" data-bs-target="#url-pane" type="button" role="tab">
+                <i class="bi bi-link-45deg"></i> Add URL
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="manage-tab" data-bs-toggle="tab" data-bs-target="#manage-pane" type="button" role="tab">
+                <i class="bi bi-list-ul"></i> Manage Sources
+            </button>
+        </li>
+    </ul>
+
+    <div class="tab-content">
+
+        <!-- Tab 1: Upload File -->
+        <div class="tab-pane fade show active" id="file-pane" role="tabpanel">
+            <div class="card" style="max-width: 640px;">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="mb-0">Upload PDF or Text File</h5>
+                </div>
+                <div class="card-body">
+                    <form id="fileUploadForm">
+                        <div class="mb-3">
+                            <label for="fileInput" class="form-label">File <span class="text-danger">*</span></label>
+                            <input type="file" class="form-control" id="fileInput" accept=".pdf,.txt" required>
+                            <div class="form-text">Supported formats: PDF, TXT.</div>
+                        </div>
+                        <div class="mb-3">
+                            <label for="fileTitleInput" class="form-label">Document Title <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="fileTitleInput" placeholder="e.g., Company Policy v2.3" required>
+                        </div>
+                        <button type="submit" class="btn btn-success" id="fileSubmitBtn">
+                            <i class="bi bi-cloud-upload"></i> Upload & Ingest
+                        </button>
+                    </form>
+
+                    <div id="fileProgress" class="alert alert-info mt-3" style="display: none;">
+                        <div class="spinner-border spinner-border-sm me-2" role="status"></div>
+                        Uploading and ingesting file...
+                    </div>
+                    <div id="fileSuccess" class="alert alert-success mt-3" style="display: none;"></div>
+                    <div id="fileError" class="alert alert-danger mt-3" style="display: none;"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tab 2: Add URL -->
+        <div class="tab-pane fade" id="url-pane" role="tabpanel">
+            <div class="card" style="max-width: 640px;">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="mb-0">Add Web URL</h5>
+                </div>
+                <div class="card-body">
+                    <p class="text-muted small">Works best with static HTML pages. JavaScript-rendered sites may not extract correctly.</p>
+                    <form id="urlForm">
+                        <div class="mb-3">
+                            <label for="urlInput" class="form-label">URL <span class="text-danger">*</span></label>
+                            <input type="url" class="form-control" id="urlInput" placeholder="https://example.com/document" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="urlTitleInput" class="form-label">Document Title <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="urlTitleInput" placeholder="e.g., Product Documentation" required>
+                        </div>
+                        <button type="submit" class="btn btn-success" id="urlSubmitBtn">
+                            <i class="bi bi-cloud-download"></i> Fetch & Ingest
+                        </button>
+                    </form>
+
+                    <div id="urlProgress" class="alert alert-info mt-3" style="display: none;">
+                        <div class="spinner-border spinner-border-sm me-2" role="status"></div>
+                        Fetching and ingesting URL...
+                    </div>
+                    <div id="urlSuccess" class="alert alert-success mt-3" style="display: none;"></div>
+                    <div id="urlError" class="alert alert-danger mt-3" style="display: none;"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tab 3: Manage Sources -->
+        <div class="tab-pane fade" id="manage-pane" role="tabpanel">
+            <div class="card">
+                <div class="card-header bg-secondary text-white">
+                    <h5 class="mb-0">User-Added Sources</h5>
+                </div>
+                <div class="card-body">
+                    <div id="sourcesList">
+                        <p class="text-muted">Loading...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// ---- File Upload ----
+document.getElementById('fileUploadForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    const fileInput = document.getElementById('fileInput');
+    const title = document.getElementById('fileTitleInput').value.trim();
+    const file = fileInput.files[0];
+
+    if (!file || !title) return;
+
+    const ext = file.name.split('.').pop().toLowerCase();
+    const type = ext === 'pdf' ? 'pdf' : 'txt';
+
+    showStatus('file', 'progress');
+
+    try {
+        const formData = new FormData();
+        formData.append('type', type);
+        formData.append('title', title);
+        formData.append('file', file);
+
+        // Do NOT set Content-Type manually — browser sets multipart boundary
+        const response = await fetch('/api/sources', { method: 'POST', body: formData });
+        const data = await response.json();
+
+        if (!response.ok) throw new Error(data.error || 'Upload failed');
+
+        showStatus('file', 'success', `✓ Added "${data.title}" (${data.chunks} chunks)`);
+        document.getElementById('fileUploadForm').reset();
+        loadSources();
+
+    } catch (err) {
+        showStatus('file', 'error', err.message);
+    }
+});
+
+// ---- URL Ingestion ----
+document.getElementById('urlForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    const url = document.getElementById('urlInput').value.trim();
+    const title = document.getElementById('urlTitleInput').value.trim();
+
+    if (!url || !title) return;
+
+    showStatus('url', 'progress');
+
+    try {
+        const response = await fetch('/api/sources', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ type: 'url', url, title })
+        });
+        const data = await response.json();
+
+        if (!response.ok) throw new Error(data.error || 'Fetch failed');
+
+        showStatus('url', 'success', `✓ Added "${data.title}" (${data.chunks} chunks)`);
+        document.getElementById('urlForm').reset();
+        loadSources();
+
+    } catch (err) {
+        showStatus('url', 'error', err.message);
+    }
+});
+
+function showStatus(prefix, state, message) {
+    document.getElementById(`${prefix}Progress`).style.display = state === 'progress' ? 'block' : 'none';
+    const successEl = document.getElementById(`${prefix}Success`);
+    const errorEl = document.getElementById(`${prefix}Error`);
+
+    if (state === 'success') {
+        successEl.textContent = message;
+        successEl.style.display = 'block';
+        errorEl.style.display = 'none';
+    } else if (state === 'error') {
+        errorEl.textContent = message;
+        errorEl.style.display = 'block';
+        successEl.style.display = 'none';
+    } else {
+        successEl.style.display = 'none';
+        errorEl.style.display = 'none';
+    }
+}
+
+// ---- Manage Sources ----
+async function loadSources() {
+    try {
+        const response = await fetch('/api/sources');
+        const data = await response.json();
+        const container = document.getElementById('sourcesList');
+
+        if (!data.sources || data.sources.length === 0) {
+            container.innerHTML = '<p class="text-muted">No user-added sources yet.</p>';
+            return;
+        }
+
+        let html = '<div class="list-group">';
+        for (const source of data.sources) {
+            const label = source.title || source.url || source.id;
+            const badge = source.type === 'pdf' ? 'bg-primary'
+                        : source.type === 'txt' ? 'bg-success'
+                        : 'bg-warning';
+            html += `
+                <div class="list-group-item d-flex justify-content-between align-items-center">
+                    <div>
+                        <span class="badge ${badge} me-2">${source.type}</span>
+                        <strong>${label}</strong>
+                        <br>
+                        <small class="text-muted">${source.chunks || 0} chunks · Added ${source.added ? source.added.substring(0,10) : 'unknown'}</small>
+                    </div>
+                    <button class="btn btn-sm btn-outline-danger delete-source" data-id="${source.id}">
+                        <i class="bi bi-trash"></i> Remove
+                    </button>
+                </div>
+            `;
+        }
+        html += '</div>';
+        container.innerHTML = html;
+
+        document.querySelectorAll('.delete-source').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                if (!confirm('Remove this source from the knowledge base?')) return;
+                await deleteSource(btn.dataset.id);
+            });
+        });
+
+    } catch (err) {
+        console.error('Error loading sources:', err);
+    }
+}
+
+async function deleteSource(id) {
+    try {
+        const response = await fetch(`/api/sources/${id}`, { method: 'DELETE' });
+        if (response.ok) {
+            loadSources();
+        } else {
+            const data = await response.json();
+            alert('Error: ' + (data.error || 'Unknown error'));
+        }
+    } catch (err) {
+        alert('Error removing source: ' + err.message);
+    }
+}
+
+// Load sources when Manage tab is clicked
+document.getElementById('manage-tab').addEventListener('shown.bs.tab', loadSources);
+</script>
+{% endblock %}

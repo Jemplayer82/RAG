@@ -1,0 +1,236 @@
+{% extends "base.html" %}
+
+{% block title %}Settings - RAG Assistant{% endblock %}
+
+{% block content %}
+<div class="py-4" style="max-width: 700px;">
+    <h2><i class="bi bi-gear"></i> Settings</h2>
+    <p class="text-muted">Configure the LLM model and local storage location.</p>
+
+    <!-- LLM Model -->
+    <div class="card mb-4">
+        <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+            <h5 class="mb-0"><i class="bi bi-cpu"></i> LLM Model</h5>
+            <button class="btn btn-sm btn-outline-light" id="refreshModelsBtn" title="Refresh model list from Ollama">
+                <i class="bi bi-arrow-repeat"></i> Refresh
+            </button>
+        </div>
+        <div class="card-body">
+            <p class="text-muted small">Select from models currently available in your running Ollama instance. Changes take effect immediately — no restart needed.</p>
+
+            <div id="ollamaError" class="alert alert-warning" style="display: none;">
+                <i class="bi bi-exclamation-triangle"></i>
+                <span id="ollamaErrorText">Could not connect to Ollama.</span>
+                Make sure Ollama is running: <code>ollama serve</code>
+            </div>
+
+            <div class="mb-3">
+                <label for="modelSelect" class="form-label fw-bold">Active Model</label>
+                <div class="input-group">
+                    <select class="form-select" id="modelSelect">
+                        <option value="">Loading models...</option>
+                    </select>
+                    <button class="btn btn-success" id="saveModelBtn">
+                        <i class="bi bi-check-lg"></i> Save
+                    </button>
+                </div>
+                <div class="form-text" id="currentModelText"></div>
+            </div>
+
+            <div id="modelSaveStatus" style="display: none;"></div>
+
+            <div class="mt-3">
+                <p class="text-muted small mb-1">To add a model to Ollama, run:</p>
+                <code>ollama pull &lt;model-name&gt;</code>
+                <p class="text-muted small mt-2 mb-0">Popular options: <code>mistral-small3.1</code>, <code>llama3.2</code>, <code>gemma3</code>, <code>phi4</code>, <code>qwen2.5</code></p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Storage Location -->
+    <div class="card mb-4">
+        <div class="card-header bg-secondary text-white">
+            <h5 class="mb-0"><i class="bi bi-folder"></i> Library Storage Location</h5>
+        </div>
+        <div class="card-body">
+            <p class="text-muted small">
+                Where ChromaDB and uploaded files are stored on your computer.
+                <strong>Restart the app after changing this.</strong>
+                Existing data will not be moved automatically.
+            </p>
+
+            <div class="mb-3">
+                <label for="dataDirInput" class="form-label fw-bold">Data Directory</label>
+                <div class="input-group">
+                    <input type="text" class="form-control font-monospace" id="dataDirInput"
+                           placeholder="e.g., C:/Users/Landon/RAG/data">
+                    <button class="btn btn-success" id="saveDirBtn">
+                        <i class="bi bi-check-lg"></i> Save
+                    </button>
+                </div>
+                <div class="form-text">
+                    Leave blank to use the default <code>./data/</code> folder inside the project.
+                </div>
+            </div>
+
+            <div id="dirSaveStatus" style="display: none;"></div>
+
+            <!-- Current paths info -->
+            <div class="mt-3 p-3 bg-light rounded" id="pathsInfo">
+                <p class="mb-1 small text-muted"><strong>Current paths:</strong></p>
+                <p class="mb-1 small font-monospace" id="pathDataDir">Loading...</p>
+                <p class="mb-1 small text-muted">↳ <span class="font-monospace">chroma/</span> — vector database</p>
+                <p class="mb-0 small text-muted">↳ <span class="font-monospace">raw/uploads/</span> — uploaded files</p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let availableModels = [];
+
+// ---- Load current settings + models on page load ----
+async function init() {
+    await Promise.all([loadModels(), loadSettings()]);
+}
+
+async function loadSettings() {
+    try {
+        const resp = await fetch('/api/settings');
+        const data = await resp.json();
+        document.getElementById('dataDirInput').value = data.data_dir || '';
+        document.getElementById('pathDataDir').textContent = data.data_dir || '(default ./data/)';
+    } catch (err) {
+        console.error('Error loading settings:', err);
+    }
+}
+
+async function loadModels() {
+    try {
+        const resp = await fetch('/api/ollama/models');
+        const data = await resp.json();
+
+        if (data.error) {
+            document.getElementById('ollamaError').style.display = 'block';
+            document.getElementById('ollamaErrorText').textContent = data.error;
+        } else {
+            document.getElementById('ollamaError').style.display = 'none';
+        }
+
+        availableModels = data.models || [];
+        const select = document.getElementById('modelSelect');
+        select.innerHTML = '';
+
+        if (availableModels.length === 0) {
+            const opt = document.createElement('option');
+            opt.value = '';
+            opt.textContent = 'No models found — pull one with ollama pull <name>';
+            select.appendChild(opt);
+        } else {
+            availableModels.forEach(name => {
+                const opt = document.createElement('option');
+                opt.value = name;
+                opt.textContent = name;
+                if (name === data.current) opt.selected = true;
+                select.appendChild(opt);
+            });
+        }
+
+        // If current model isn't in the list (e.g. set manually via .env), add it
+        if (data.current && !availableModels.includes(data.current)) {
+            const opt = document.createElement('option');
+            opt.value = data.current;
+            opt.textContent = `${data.current} (current, not in Ollama list)`;
+            opt.selected = true;
+            select.insertBefore(opt, select.firstChild);
+        }
+
+        document.getElementById('currentModelText').textContent =
+            data.current ? `Currently active: ${data.current}` : '';
+
+    } catch (err) {
+        console.error('Error loading models:', err);
+        document.getElementById('ollamaError').style.display = 'block';
+        document.getElementById('ollamaErrorText').textContent = `Fetch error: ${err.message}`;
+    }
+}
+
+// ---- Refresh button ----
+document.getElementById('refreshModelsBtn').addEventListener('click', async () => {
+    document.getElementById('refreshModelsBtn').disabled = true;
+    await loadModels();
+    document.getElementById('refreshModelsBtn').disabled = false;
+});
+
+// ---- Save model ----
+document.getElementById('saveModelBtn').addEventListener('click', async () => {
+    const model = document.getElementById('modelSelect').value;
+    if (!model) return;
+
+    try {
+        const resp = await fetch('/api/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ llm_model: model })
+        });
+        const data = await resp.json();
+
+        const el = document.getElementById('modelSaveStatus');
+        if (!resp.ok) {
+            el.innerHTML = `<div class="alert alert-danger mt-2">Error: ${data.error}</div>`;
+        } else {
+            el.innerHTML = `<div class="alert alert-success mt-2">✓ Model set to <strong>${model}</strong>. Active immediately.</div>`;
+            document.getElementById('currentModelText').textContent = `Currently active: ${model}`;
+        }
+        el.style.display = 'block';
+        setTimeout(() => { el.style.display = 'none'; }, 4000);
+
+    } catch (err) {
+        document.getElementById('modelSaveStatus').innerHTML =
+            `<div class="alert alert-danger mt-2">Error: ${err.message}</div>`;
+        document.getElementById('modelSaveStatus').style.display = 'block';
+    }
+});
+
+// ---- Save data dir ----
+document.getElementById('saveDirBtn').addEventListener('click', async () => {
+    const dir = document.getElementById('dataDirInput').value.trim();
+
+    try {
+        const resp = await fetch('/api/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ data_dir: dir })
+        });
+        const data = await resp.json();
+
+        const el = document.getElementById('dirSaveStatus');
+        if (!resp.ok) {
+            el.innerHTML = `<div class="alert alert-danger mt-2">Error: ${data.error}</div>`;
+        } else {
+            const msg = dir
+                ? `✓ Data directory set to <strong>${dir}</strong>.`
+                : '✓ Data directory reset to default (<code>./data/</code>).';
+            el.innerHTML = `
+                <div class="alert alert-warning mt-2">
+                    ${msg}
+                    <strong>Restart the app for this to take effect.</strong>
+                    Existing data will not be moved automatically — copy the
+                    <code>chroma/</code> and <code>raw/</code> folders to the new location if needed.
+                </div>`;
+            document.getElementById('pathDataDir').textContent = dir || '(default ./data/)';
+        }
+        el.style.display = 'block';
+
+    } catch (err) {
+        document.getElementById('dirSaveStatus').innerHTML =
+            `<div class="alert alert-danger mt-2">Error: ${err.message}</div>`;
+        document.getElementById('dirSaveStatus').style.display = 'block';
+    }
+});
+
+init();
+</script>
+{% endblock %}

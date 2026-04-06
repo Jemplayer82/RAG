@@ -1,0 +1,214 @@
+{% extends "base.html" %}
+
+{% block title %}Chat - RAG Assistant{% endblock %}
+
+{% block content %}
+<div class="row h-100" style="min-height: 100vh; padding-top: 20px;">
+    <!-- Chat History (Left) -->
+    <div class="col-md-8">
+        <div class="card h-100 d-flex flex-column">
+            <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">Knowledge Base Assistant</h5>
+                <button type="button" class="btn btn-sm btn-outline-light" id="clearChatBtn">
+                    <i class="bi bi-trash"></i> Clear
+                </button>
+            </div>
+
+            <!-- Messages -->
+            <div class="card-body flex-grow-1 overflow-auto" id="chatHistory">
+                <div class="text-center text-muted mt-5">
+                    <p><i class="bi bi-chat-dots" style="font-size: 3rem;"></i></p>
+                    <p>Ask a question about your documents.</p>
+                </div>
+            </div>
+
+            <!-- Input -->
+            <div class="card-footer">
+                <form id="queryForm" class="input-group">
+                    <input
+                        type="text"
+                        class="form-control"
+                        id="questionInput"
+                        placeholder="Ask a question about your documents..."
+                        autocomplete="off"
+                    >
+                    <button class="btn btn-primary" type="submit" id="submitBtn">
+                        <i class="bi bi-send"></i> Send
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Sources Panel (Right) -->
+    <div class="col-md-4">
+        <div class="card h-100 d-flex flex-column">
+            <div class="card-header bg-secondary text-white">
+                <h5 class="mb-0">Sources</h5>
+            </div>
+
+            <div class="card-body overflow-auto flex-grow-1" id="sourcesPanel">
+                <p class="text-muted text-center mt-3">No sources yet. Submit a query to see cited sources.</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Loading Spinner Modal -->
+<div class="modal" id="loadingModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-body text-center">
+                <div class="spinner-border mb-3" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+                <p>Querying LLM...</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+const loadingModal = new bootstrap.Modal(document.getElementById('loadingModal'), { backdrop: 'static', keyboard: false });
+
+document.getElementById('queryForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    const question = document.getElementById('questionInput').value.trim();
+    if (!question) return;
+
+    document.getElementById('questionInput').disabled = true;
+    document.getElementById('submitBtn').disabled = true;
+    loadingModal.show();
+
+    try {
+        addMessageToHistory('user', question);
+
+        const response = await fetch('/ask', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ question, chat_history: [] })
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Query failed');
+        }
+
+        const result = await response.json();
+
+        addMessageToHistory('assistant', result.answer);
+        updateSourcesPanel(result.sources);
+
+        document.getElementById('questionInput').value = '';
+
+    } catch (error) {
+        addMessageToHistory('assistant', `⚠️ Error: ${error.message}`);
+    } finally {
+        loadingModal.hide();
+        document.getElementById('questionInput').disabled = false;
+        document.getElementById('submitBtn').disabled = false;
+        document.getElementById('questionInput').focus();
+    }
+});
+
+function addMessageToHistory(role, content) {
+    const chatHistory = document.getElementById('chatHistory');
+
+    const placeholder = chatHistory.querySelector('.text-muted');
+    if (placeholder) placeholder.remove();
+
+    const messageDiv = document.createElement('div');
+    messageDiv.className = `mb-3 ${role === 'user' ? 'text-end' : 'text-start'}`;
+
+    const bubble = document.createElement('div');
+    bubble.className = role === 'user'
+        ? 'bg-primary text-white rounded p-3 d-inline-block'
+        : 'bg-light rounded p-3 d-inline-block';
+    bubble.style.maxWidth = '90%';
+
+    if (role === 'user') {
+        bubble.textContent = content;
+    } else {
+        bubble.innerHTML = escapeHtml(content)
+            .replace(/\n/g, '<br>')
+            .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+            .replace(/__(.*?)__/g, '<em>$1</em>')
+            .replace(/- /g, '• ')
+            .replace(/\[(\d+)\]/g, '<span class="badge bg-info">[<span style="color: white;">$1</span>]</span>');
+    }
+
+    messageDiv.appendChild(bubble);
+    chatHistory.appendChild(messageDiv);
+
+    chatHistory.scrollTop = chatHistory.scrollHeight;
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function updateSourcesPanel(sources) {
+    const panel = document.getElementById('sourcesPanel');
+
+    if (!sources || sources.length === 0) {
+        panel.innerHTML = '<p class="text-muted text-center mt-3">No sources cited.</p>';
+        return;
+    }
+
+    let html = `<div style="margin-bottom: 10px;"><strong style="color: #333;">Cited Sources [${sources.length}]</strong></div>`;
+    html += '<div class="list-group list-group-flush">';
+
+    sources.forEach(source => {
+        const icon = '<i class="bi bi-file-earmark-text" style="color: #0d6efd;"></i>';
+
+        if (source.url) {
+            html += `
+                <a href="${source.url}" target="_blank" class="list-group-item list-group-item-action py-2">
+                    <div class="d-flex align-items-start justify-content-between">
+                        <div style="flex: 1;">
+                            <div class="mb-1">
+                                <small class="fw-bold">${icon} [${source.index}] ${source.citation}</small>
+                            </div>
+                            <small class="text-muted">${source.doc_type}</small>
+                        </div>
+                        <i class="bi bi-box-arrow-up-right" style="color: #999; margin-left: 8px;"></i>
+                    </div>
+                </a>
+            `;
+        } else {
+            html += `
+                <div class="list-group-item py-2">
+                    <div>
+                        <small class="fw-bold">${icon} [${source.index}] ${source.citation}</small>
+                    </div>
+                    <small class="text-muted">${source.doc_type}</small>
+                </div>
+            `;
+        }
+    });
+    html += '</div>';
+
+    panel.innerHTML = html;
+}
+
+document.getElementById('clearChatBtn').addEventListener('click', () => {
+    document.getElementById('chatHistory').innerHTML = `
+        <div class="text-center text-muted mt-5">
+            <p><i class="bi bi-chat-dots" style="font-size: 3rem;"></i></p>
+            <p>Ask a question about your documents.</p>
+        </div>
+    `;
+    document.getElementById('sourcesPanel').innerHTML = '<p class="text-muted text-center mt-3">No sources yet. Submit a query to see cited sources.</p>';
+    document.getElementById('questionInput').value = '';
+    document.getElementById('questionInput').focus();
+});
+
+document.getElementById('questionInput').focus();
+</script>
+{% endblock %}
