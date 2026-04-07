@@ -40,6 +40,7 @@ sqlalchemy==2.0.0
 psycopg2-binary==2.9.9
 
 # Auth
+python-multipart==0.0.9
 pydantic>=2.9
 pyjwt==2.8.0
 passlib==1.7.4
