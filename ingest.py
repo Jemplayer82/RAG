@@ -196,11 +196,40 @@ def ingest_txt(file_path: str, title: str, url_hint: str = "") -> Tuple[List[Dic
 # INGESTION: Web URL
 # ============================================================================
 
+def _extract_text_requests(url: str) -> str:
+    """Fallback scraper using requests + BeautifulSoup."""
+    response = requests.get(url, timeout=30, headers={"User-Agent": "Mozilla/5.0"})
+    response.raise_for_status()
+    soup = BeautifulSoup(response.content, "html.parser")
+    for tag in soup(["script", "style", "nav", "footer", "header", "aside"]):
+        tag.decompose()
+    return soup.get_text(separator="\n", strip=True)
+
+
+def _extract_text_scrapling(url: str) -> str:
+    """Primary scraper using Scrapling — handles JS-rendered pages and anti-bot."""
+    from scrapling import Fetcher, PlayWrightFetcher
+    try:
+        # Try fast fetch first (handles most sites + basic anti-bot)
+        fetcher = Fetcher(auto_match=False)
+        page = fetcher.get(url, timeout=30)
+        text = page.get_all_text(ignore_tags=("script", "style", "nav", "footer", "header", "aside"))
+        if text and len(text) >= 200:
+            logger.info(f"[URL] Scrapling fast fetch succeeded for {url}")
+            return text
+    except Exception as e:
+        logger.warning(f"[URL] Scrapling fast fetch failed ({e}), trying PlayWright...")
+
+    # Fallback to Playwright for JS-heavy sites
+    fetcher = PlayWrightFetcher(auto_match=False)
+    page = fetcher.get(url, timeout=60)
+    return page.get_all_text(ignore_tags=("script", "style", "nav", "footer", "header", "aside"))
+
+
 def ingest_url(url: str, title: str) -> Tuple[List[Dict], int]:
     """
     Fetch a web page, extract clean text, and chunk it.
-
-    Removes nav, footer, script, and other boilerplate before extraction.
+    Uses Scrapling (JS rendering + anti-bot) with fallback to requests/BeautifulSoup.
 
     Args:
         url: Web URL to fetch
@@ -210,19 +239,21 @@ def ingest_url(url: str, title: str) -> Tuple[List[Dict], int]:
         (chunks, word_count)
 
     Raises:
-        requests.HTTPError: If the URL returns a non-2xx status
         ValueError: If insufficient text is extracted
     """
-    response = requests.get(url, timeout=30, headers={"User-Agent": "RAG/1.0"})
-    response.raise_for_status()
+    text = ""
 
-    soup = BeautifulSoup(response.content, "html.parser")
-
-    # Remove boilerplate tags
-    for tag in soup(["script", "style", "nav", "footer", "header", "aside"]):
-        tag.decompose()
-
-    text = soup.get_text(separator="\n", strip=True)
+    # Try Scrapling first
+    try:
+        text = _extract_text_scrapling(url)
+        logger.info(f"[URL] Scrapling extracted {len(text)} chars from {url}")
+    except Exception as e:
+        logger.warning(f"[URL] Scrapling failed ({e}), falling back to requests")
+        try:
+            text = _extract_text_requests(url)
+            logger.info(f"[URL] requests fallback extracted {len(text)} chars from {url}")
+        except Exception as e2:
+            raise ValueError(f"Failed to fetch {url}: {e2}")
 
     if len(text) < 100:
         raise ValueError(f"Insufficient text extracted from {url} ({len(text)} chars)")
