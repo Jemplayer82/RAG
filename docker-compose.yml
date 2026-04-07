@@ -30,8 +30,7 @@ services:
       - redis_data:/data
     restart: unless-stopped
 
-  rag:
-    image: ghcr.io/jemplayer82/rag:latest
+    rag:
     build: .
     ports:
       - "8000:8000"
@@ -51,8 +50,7 @@ services:
         condition: service_started
     restart: unless-stopped
 
-  rag-worker:
-    image: ghcr.io/jemplayer82/rag:latest
+    rag-worker:
     build: .
     command: ["python", "worker.py"]
     env_file: .env
@@ -63,9 +61,12 @@ services:
     volumes:
       - uploads_data:/app/data
     depends_on:
-      - postgres
-      - qdrant
-      - redis
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+      redis:
+        condition: service_started
     restart: unless-stopped
 
   nginx:
