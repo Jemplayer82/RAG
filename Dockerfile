@@ -12,7 +12,7 @@ CMD ["gunicorn", "--bind", "0.0.0.0:8000", "app_fastapi:app"]
 
 # nginx.conf
 user  nginx;
-worker_processes  auto;
+worker_processes  4;
 
 error_log  /var/log/nginx/error.log notice;
 pid        /var/run/nginx.pid;
