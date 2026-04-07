@@ -1,53 +1,66 @@
 """
-FastAPI web application for scalable multi-user RAG.
-- Async request handling (non-blocking)
-- PostgreSQL users + JWT auth
-- Qdrant vector DB (replaces ChromaDB)
-- Redis job queue for background ingestion
-- Per-user document isolation
+FastAPI web application for RAG v2.0 — multi-user, production-ready.
+- Async request handling (non-blocking Gunicorn + Uvicorn workers)
+- PostgreSQL user accounts + JWT auth
+- Qdrant vector DB with per-user namespace isolation
+- Redis RQ for background document ingestion
+- Serves Jinja2 HTML templates + static files
 
 Routes:
-  POST   /api/auth/register       — Create account
-  POST   /api/auth/login          — Get JWT token
-  GET    /api/auth/me             — Current user
-  POST   /api/chat                — Query with auth
-  GET    /api/library             — User's documents
-  POST   /api/sources             — Add document (queued)
-  DELETE /api/sources/<id>        — Remove document
-  GET    /api/settings            — User preferences
-  POST   /api/settings            — Update preferences
-  GET    /api/admin/status        — Server health (admin only)
+  GET    /                      — Chat page (requires auth)
+  GET    /login                 — Login page
+  GET    /register              — Register page
+  GET    /library               — Library page (requires auth)
+  GET    /upload                — Upload page (requires auth)
+  GET    /settings              — Settings page (requires auth)
+
+  POST   /api/auth/register     — Create account
+  POST   /api/auth/login        — Get JWT token
+  GET    /api/auth/me           — Current user info
+
+  POST   /api/chat              — Query RAG (auth required)
+  GET    /api/library           — List user's documents (auth required)
+  POST   /api/sources           — Add document / URL (auth required)
+  DELETE /api/sources/{id}      — Remove document (auth required)
+  GET    /api/sources/jobs/{id} — Poll ingestion job status (auth required)
+
+  GET    /api/settings          — User preferences (auth required)
+  POST   /api/settings          — Update preferences (auth required)
+  GET    /api/health            — Server health check
 """
 
 import asyncio
 import logging
 import os
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, status
-from fastapi.responses import JSONResponse
-from fastapi.staticfiles import StaticFiles
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from sqlalchemy import create_engine, Column, String, DateTime, Integer
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, Session
 import jwt
-from passlib.context import CryptContext
 import aiofiles
-from pathlib import Path
+from fastapi import (
+    FastAPI, Depends, HTTPException, UploadFile, File,
+    Form, Request, status
+)
+from fastapi.responses import JSONResponse, HTMLResponse
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from fastapi.middleware.cors import CORSMiddleware
+from passlib.context import CryptContext
+from pydantic import BaseModel
+from redis import Redis
+from rq import Queue
+from sqlalchemy.orm import Session
+from werkzeug.utils import secure_filename
 
 from config import (
-    OLLAMA_BASE_URL, LLM_MODEL, EMBED_MODEL, EMBED_DEVICE,
-    CHUNK_SIZE, CHUNK_OVERLAP, TOP_K, RERANK_TOP_K,
-    RAG_PROMPT_TEMPLATE, DEBUG, CACHE_ROOT
+    OLLAMA_BASE_URL, LLM_MODEL, EMBED_MODEL,
+    DEBUG, CACHE_ROOT, REDIS_URL
 )
+from models import User, Document, IngestionJob, get_session_local, init_db
 from rag_async import query_async
-from ingest_async import (
-    ingest_pdf_async, ingest_txt_async, ingest_url_async,
-    QdrantManager
-)
+from ingest_async import QdrantManager, run_ingestion_job
 
 # ============================================================================
 # LOGGING
@@ -60,46 +73,36 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ============================================================================
-# DATABASE SETUP
-# ============================================================================
-
-DATABASE_URL = "postgresql://rag:rag_password@postgres:5432/rag_db"
-engine = create_engine(DATABASE_URL, echo=False)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-Base = declarative_base()
-
-class User(Base):
-    __tablename__ = "users"
-    id = Column(Integer, primary_key=True, index=True)
-    username = Column(String, unique=True, index=True)
-    email = Column(String, unique=True, index=True)
-    hashed_password = Column(String)
-    created_at = Column(DateTime, default=datetime.utcnow)
-
-Base.metadata.create_all(bind=engine)
-
-# ============================================================================
-# AUTH
+# AUTH SETUP
 # ============================================================================
 
 SECRET_KEY = os.getenv("JWT_SECRET", "change_me_in_production_with_random_string")
 ALGORITHM = "HS256"
+TOKEN_EXPIRE_DAYS = 30
+
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)
 
-class Token(BaseModel):
-    access_token: str
-    token_type: str
 
-class UserCreate(BaseModel):
-    username: str
-    email: str
-    password: str
+def hash_password(password: str) -> str:
+    return pwd_context.hash(password)
 
-class UserResponse(BaseModel):
-    id: int
-    username: str
-    email: str
-    created_at: datetime
+
+def verify_password(plain: str, hashed: str) -> bool:
+    return pwd_context.verify(plain, hashed)
+
+
+def create_access_token(username: str) -> str:
+    expire = datetime.utcnow() + timedelta(days=TOKEN_EXPIRE_DAYS)
+    return jwt.encode({"sub": username, "exp": expire}, SECRET_KEY, algorithm=ALGORITHM)
+
+
+# ============================================================================
+# DATABASE DEPENDENCY
+# ============================================================================
+
+SessionLocal = get_session_local()
+
 
 def get_db():
     db = SessionLocal()
@@ -108,27 +111,77 @@ def get_db():
     finally:
         db.close()
 
-def get_current_user(token: str, db: Session = Depends(get_db)) -> User:
-    """Extract user from JWT token."""
+
+def get_current_user(
+    token: Optional[str] = Depends(oauth2_scheme),
+    db: Session = Depends(get_db)
+) -> User:
+    """Extract and validate user from JWT Bearer token."""
+    if not token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         username: str = payload.get("sub")
-        if username is None:
+        if not username:
             raise HTTPException(status_code=401, detail="Invalid token")
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expired")
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid token")
 
     user = db.query(User).filter(User.username == username).first()
-    if user is None:
+    if not user:
         raise HTTPException(status_code=401, detail="User not found")
     return user
 
-def create_access_token(username: str, expires_delta: Optional[timedelta] = None) -> str:
-    if expires_delta is None:
-        expires_delta = timedelta(days=30)
-    expire = datetime.utcnow() + expires_delta
-    to_encode = {"sub": username, "exp": expire}
-    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+# ============================================================================
+# REDIS / RQ SETUP
+# ============================================================================
+
+def get_redis():
+    return Redis.from_url(REDIS_URL)
+
+
+def get_ingestion_queue():
+    return Queue("ingestion", connection=get_redis())
+
+
+# ============================================================================
+# PYDANTIC SCHEMAS
+# ============================================================================
+
+class UserCreate(BaseModel):
+    username: str
+    email: str
+    password: str
+
+
+class UserResponse(BaseModel):
+    id: int
+    username: str
+    email: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str
+
+
+class ChatRequest(BaseModel):
+    question: str
+    chat_history: Optional[list] = []
+
+
+class ChatResponse(BaseModel):
+    answer: str
+    sources: list
+    metadata: dict
+
 
 # ============================================================================
 # FASTAPI APP
@@ -141,7 +194,6 @@ app = FastAPI(
     openapi_url="/api/openapi.json" if DEBUG else None,
 )
 
-# CORS for frontend
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -150,25 +202,43 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Serve static files
 app.mount("/static", StaticFiles(directory="static"), name="static")
+templates = Jinja2Templates(directory="templates")
+
 
 # ============================================================================
-# MODELS
+# ROUTES: HTML Pages
 # ============================================================================
 
-class ChatRequest(BaseModel):
-    question: str
+@app.get("/", response_class=HTMLResponse)
+async def chat_page(request: Request):
+    return templates.TemplateResponse("chat.html", {"request": request})
 
-class ChatResponse(BaseModel):
-    answer: str
-    sources: list
-    metadata: dict
 
-class SourceAdd(BaseModel):
-    type: str  # "pdf", "txt", "url"
-    title: str
-    url: Optional[str] = None
+@app.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request):
+    return templates.TemplateResponse("login.html", {"request": request})
+
+
+@app.get("/register", response_class=HTMLResponse)
+async def register_page(request: Request):
+    return templates.TemplateResponse("register.html", {"request": request})
+
+
+@app.get("/library", response_class=HTMLResponse)
+async def library_page(request: Request):
+    return templates.TemplateResponse("library.html", {"request": request})
+
+
+@app.get("/upload", response_class=HTMLResponse)
+async def upload_page(request: Request):
+    return templates.TemplateResponse("upload.html", {"request": request})
+
+
+@app.get("/settings", response_class=HTMLResponse)
+async def settings_page(request: Request):
+    return templates.TemplateResponse("settings.html", {"request": request})
+
 
 # ============================================================================
 # ROUTES: Auth
@@ -177,78 +247,92 @@ class SourceAdd(BaseModel):
 @app.post("/api/auth/register", response_model=UserResponse)
 async def register(user_data: UserCreate, db: Session = Depends(get_db)):
     """Create a new user account."""
-    # Check if user exists
     existing = db.query(User).filter(
         (User.username == user_data.username) | (User.email == user_data.email)
     ).first()
     if existing:
-        raise HTTPException(status_code=400, detail="User already exists")
+        raise HTTPException(status_code=400, detail="Username or email already registered")
 
-    hashed = pwd_context.hash(user_data.password)
-    user = User(username=user_data.username, email=user_data.email, hashed_password=hashed)
+    user = User(
+        username=user_data.username,
+        email=user_data.email,
+        hashed_password=hash_password(user_data.password)
+    )
     db.add(user)
     db.commit()
     db.refresh(user)
-
-    logger.info(f"[AUTH] New user registered: {user.username}")
+    logger.info(f"[AUTH] Registered: {user.username}")
     return user
 
-@app.post("/api/auth/login", response_model=Token)
-async def login(username: str, password: str, db: Session = Depends(get_db)):
-    """Authenticate and return JWT token."""
-    user = db.query(User).filter(User.username == username).first()
-    if not user or not pwd_context.verify(password, user.hashed_password):
-        raise HTTPException(status_code=401, detail="Invalid credentials")
 
-    token = create_access_token(username)
-    logger.info(f"[AUTH] Login: {username}")
+@app.post("/api/auth/login", response_model=Token)
+async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+    """Authenticate and return JWT token."""
+    user = db.query(User).filter(User.username == form_data.username).first()
+    if not user or not verify_password(form_data.password, user.hashed_password):
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+
+    token = create_access_token(user.username)
+    logger.info(f"[AUTH] Login: {user.username}")
     return {"access_token": token, "token_type": "bearer"}
+
 
 @app.get("/api/auth/me", response_model=UserResponse)
 async def get_me(user: User = Depends(get_current_user)):
-    """Get current authenticated user."""
+    """Return current authenticated user info."""
     return user
+
 
 # ============================================================================
 # ROUTES: Chat
 # ============================================================================
 
 @app.post("/api/chat", response_model=ChatResponse)
-async def chat(
-    req: ChatRequest,
-    user: User = Depends(get_current_user),
-):
-    """Query the RAG with user isolation."""
+async def chat(req: ChatRequest, user: User = Depends(get_current_user)):
+    """Query the RAG engine with per-user document isolation."""
+    if not req.question.strip():
+        raise HTTPException(status_code=400, detail="Question cannot be empty")
     try:
-        # Run blocking RAG query in thread pool to keep event loop responsive
-        result = await asyncio.to_thread(
-            query_async,
+        result = await query_async(
             question=req.question,
             user_id=user.id,
-            user_namespace=f"user_{user.id}"
+            chat_history=req.chat_history
         )
         return result
-    except ConnectionError as e:
-        logger.error(f"Ollama connection error: {e}")
-        raise HTTPException(status_code=503, detail="Ollama unavailable")
     except Exception as e:
-        logger.error(f"Chat error: {e}")
+        logger.error(f"[CHAT] Error for user {user.id}: {e}")
+        if "connect" in str(e).lower():
+            raise HTTPException(status_code=503, detail="Cannot connect to Ollama. Make sure ollama serve is running.")
         raise HTTPException(status_code=500, detail=str(e))
 
+
 # ============================================================================
-# ROUTES: Document Management
+# ROUTES: Library
 # ============================================================================
 
 @app.get("/api/library")
-async def library(user: User = Depends(get_current_user)):
-    """List user's indexed documents from Qdrant."""
-    try:
-        qm = QdrantManager(namespace=f"user_{user.id}")
-        docs = await asyncio.to_thread(qm.list_collections)
-        return {"documents": docs, "total": len(docs)}
-    except Exception as e:
-        logger.error(f"Library error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+async def get_library(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """List user's indexed documents from PostgreSQL."""
+    docs = db.query(Document).filter(Document.user_id == user.id).order_by(Document.created_at.desc()).all()
+    return {
+        "documents": [
+            {
+                "id": d.id,
+                "title": d.title,
+                "doc_type": d.doc_type,
+                "url": d.url,
+                "chunks": d.chunks,
+                "created_at": d.created_at.isoformat(),
+            }
+            for d in docs
+        ],
+        "total": len(docs)
+    }
+
+
+# ============================================================================
+# ROUTES: Source Management
+# ============================================================================
 
 @app.post("/api/sources")
 async def add_source(
@@ -257,64 +341,182 @@ async def add_source(
     file: Optional[UploadFile] = File(None),
     url: Optional[str] = Form(None),
     user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     """
     Add a new source (PDF, TXT, or URL).
-    Returns job ID immediately; ingestion happens in background.
+    File is saved immediately; ingestion is queued as a background job.
+    Returns job_id for status polling.
     """
+    if not title.strip():
+        raise HTTPException(status_code=400, detail="Title is required")
+
+    doc_type = type.lower()
+    file_path = ""
+    source_url = url or ""
+
+    # Save uploaded file to disk
+    if doc_type in ("pdf", "txt") and file:
+        safe_name = secure_filename(file.filename)
+        dest = Path(CACHE_ROOT) / "uploads" / f"{user.id}_{safe_name}"
+        dest.parent.mkdir(parents=True, exist_ok=True)
+
+        async with aiofiles.open(dest, "wb") as f:
+            content = await file.read()
+            await f.write(content)
+
+        file_path = str(dest)
+
+    elif doc_type == "url" and url:
+        source_url = url.strip()
+    else:
+        raise HTTPException(status_code=400, detail="Invalid source type or missing file/URL")
+
+    doc_id_prefix = f"{doc_type}_{title.lower().replace(' ', '_')}"
+
+    # Create Document record (chunks=0 until job completes)
+    doc = Document(
+        user_id=user.id,
+        title=title,
+        doc_type=doc_type,
+        url=source_url,
+        cached_path=file_path,
+        chunks=0,
+        qdrant_collection=f"user_{user.id}"
+    )
+    db.add(doc)
+    db.commit()
+    db.refresh(doc)
+
+    # Create IngestionJob record
+    job_record = IngestionJob(user_id=user.id, document_id=doc.id, status="queued")
+    db.add(job_record)
+    db.commit()
+    db.refresh(job_record)
+
+    # Enqueue background job in Redis RQ
     try:
-        job_id = None
-
-        if type == "pdf" and file:
-            # Save to disk, enqueue ingestion job
-            dest = CACHE_ROOT / "uploads" / f"{user.id}_{file.filename}"
-            dest.parent.mkdir(parents=True, exist_ok=True)
-
-            async with aiofiles.open(dest, "wb") as f:
-                content = await file.read()
-                await f.write(content)
-
-            # Enqueue job (would be done with Redis RQ in production)
-            job_id = f"pdf_{user.id}_{file.filename}"
-            logger.info(f"[JOB] Queued PDF ingestion: {job_id}")
-
-        elif type == "txt" and file:
-            dest = CACHE_ROOT / "uploads" / f"{user.id}_{file.filename}"
-            dest.parent.mkdir(parents=True, exist_ok=True)
-
-            async with aiofiles.open(dest, "wb") as f:
-                content = await file.read()
-                await f.write(content)
-
-            job_id = f"txt_{user.id}_{file.filename}"
-            logger.info(f"[JOB] Queued TXT ingestion: {job_id}")
-
-        elif type == "url" and url:
-            job_id = f"url_{user.id}_{title}"
-            logger.info(f"[JOB] Queued URL ingestion: {job_id}")
-        else:
-            raise HTTPException(status_code=400, detail="Invalid source type or missing file/URL")
-
-        return {"status": "queued", "job_id": job_id, "type": type, "title": title}
-
+        q = get_ingestion_queue()
+        rq_job = q.enqueue(
+            run_ingestion_job,
+            kwargs={
+                "file_path": file_path,
+                "title": title,
+                "doc_type": doc_type,
+                "user_id": user.id,
+                "url": source_url,
+                "doc_id_prefix": doc_id_prefix,
+            },
+            job_timeout=600,
+            result_ttl=3600,
+        )
+        job_record.rq_job_id = rq_job.id
+        db.commit()
+        logger.info(f"[SOURCES] Queued job {rq_job.id} for user {user.id}: {title}")
     except Exception as e:
-        logger.error(f"Add source error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.warning(f"[SOURCES] Redis unavailable, running inline: {e}")
+        # Fallback: run synchronously if Redis not available
+        try:
+            count = await asyncio.to_thread(
+                run_ingestion_job,
+                file_path=file_path, title=title, doc_type=doc_type,
+                user_id=user.id, url=source_url, doc_id_prefix=doc_id_prefix
+            )
+            doc.chunks = count
+            job_record.status = "complete"
+            job_record.completed_at = datetime.utcnow()
+            db.commit()
+        except Exception as ingest_err:
+            job_record.status = "error"
+            job_record.error_msg = str(ingest_err)
+            db.commit()
+            raise HTTPException(status_code=500, detail=f"Ingestion failed: {ingest_err}")
 
-@app.delete("/api/sources/{source_id}")
-async def delete_source(
-    source_id: str,
+    return {
+        "status": "queued",
+        "job_id": job_record.id,
+        "document_id": doc.id,
+        "title": title,
+        "type": doc_type
+    }
+
+
+@app.get("/api/sources/jobs/{job_id}")
+async def get_job_status(
+    job_id: int,
     user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
-    """Remove a user's document from Qdrant."""
+    """Poll ingestion job status."""
+    job = db.query(IngestionJob).filter(
+        IngestionJob.id == job_id,
+        IngestionJob.user_id == user.id
+    ).first()
+
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    # Sync status from Redis RQ if we have a job ID
+    if job.rq_job_id and job.status == "queued":
+        try:
+            from rq.job import Job as RQJob
+            rq_job = RQJob.fetch(job.rq_job_id, connection=get_redis())
+            rq_status = rq_job.get_status()
+
+            if rq_status == "finished":
+                job.status = "complete"
+                job.completed_at = datetime.utcnow()
+                if job.document and rq_job.result:
+                    job.document.chunks = rq_job.result
+                db.commit()
+            elif rq_status == "failed":
+                job.status = "error"
+                job.error_msg = str(rq_job.exc_info or "Unknown error")
+                db.commit()
+            elif rq_status == "started":
+                job.status = "running"
+                db.commit()
+        except Exception as e:
+            logger.warning(f"[JOB] Could not fetch RQ status: {e}")
+
+    return {
+        "job_id": job.id,
+        "status": job.status,
+        "error": job.error_msg,
+        "created_at": job.created_at.isoformat(),
+        "completed_at": job.completed_at.isoformat() if job.completed_at else None,
+    }
+
+
+@app.delete("/api/sources/{doc_id}")
+async def delete_source(
+    doc_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Remove a document from Qdrant and PostgreSQL."""
+    doc = db.query(Document).filter(
+        Document.id == doc_id,
+        Document.user_id == user.id
+    ).first()
+
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    # Remove from Qdrant
+    doc_id_prefix = f"{doc.doc_type}_{doc.title.lower().replace(' ', '_')}"
     try:
-        qm = QdrantManager(namespace=f"user_{user.id}")
-        await asyncio.to_thread(qm.delete_collection, source_id)
-        logger.info(f"[USER {user.id}] Deleted source: {source_id}")
-        return {"status": "deleted", "id": source_id}
+        qm = QdrantManager(user_id=user.id)
+        await asyncio.to_thread(qm.delete_document, doc_id_prefix)
     except Exception as e:
-        logger.error(f"Delete source error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.warning(f"[SOURCES] Qdrant delete warning: {e}")
+
+    # Remove from PostgreSQL
+    db.delete(doc)
+    db.commit()
+    logger.info(f"[SOURCES] Deleted doc {doc_id} for user {user.id}")
+    return {"status": "deleted", "id": doc_id}
+
 
 # ============================================================================
 # ROUTES: Settings
@@ -322,21 +524,26 @@ async def delete_source(
 
 @app.get("/api/settings")
 async def get_settings(user: User = Depends(get_current_user)):
-    """Get user preferences."""
+    """Return current user settings."""
     return {
         "user_id": user.id,
-        "created_at": user.created_at,
+        "username": user.username,
+        "email": user.email,
     }
+
 
 @app.post("/api/settings")
 async def update_settings(
     data: dict,
     user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
-    """Update user preferences."""
-    # In production, store per-user settings in DB
-    # For now, using global settings via settings.py
+    """Update user profile settings."""
+    if "email" in data:
+        user.email = data["email"].strip()
+        db.commit()
     return {"status": "updated"}
+
 
 # ============================================================================
 # ROUTES: Health
@@ -344,20 +551,27 @@ async def update_settings(
 
 @app.get("/api/health")
 async def health():
-    """Server health check."""
+    """Server health check — used by Docker and load balancers."""
     return {
         "status": "ok",
-        "timestamp": datetime.utcnow().isoformat(),
         "version": "2.0.0",
+        "timestamp": datetime.utcnow().isoformat(),
     }
+
 
 # ============================================================================
 # ERROR HANDLERS
 # ============================================================================
 
-@app.exception_handler(HTTPException)
-async def http_exception_handler(request, exc):
-    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+@app.exception_handler(404)
+async def not_found_handler(request: Request, exc):
+    return JSONResponse(status_code=404, content={"detail": "Not found"})
+
+
+@app.exception_handler(500)
+async def server_error_handler(request: Request, exc):
+    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+
 
 # ============================================================================
 # STARTUP / SHUTDOWN
@@ -365,18 +579,22 @@ async def http_exception_handler(request, exc):
 
 @app.on_event("startup")
 async def startup():
-    logger.info("RAG FastAPI server starting...")
+    logger.info("RAG v2.0 FastAPI server starting...")
     logger.info(f"Ollama: {OLLAMA_BASE_URL}")
-    logger.info(f"Cache Root: {CACHE_ROOT}")
+    logger.info(f"Cache: {CACHE_ROOT}")
+    init_db()
+    logger.info("Database tables initialized")
+
 
 @app.on_event("shutdown")
 async def shutdown():
-    logger.info("RAG FastAPI server shutting down...")
+    logger.info("RAG v2.0 FastAPI server shutting down...")
+
 
 # ============================================================================
-# RUN
+# RUN (development only — production uses Gunicorn)
 # ============================================================================
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000, workers=4)
+    uvicorn.run("app_fastapi:app", host="0.0.0.0", port=8000, reload=DEBUG)

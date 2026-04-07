@@ -59,6 +59,15 @@ EMBED_DEVICE = os.getenv("EMBED_DEVICE", "cpu")
 CHROMA_COLLECTION = os.getenv("CHROMA_COLLECTION", "rag_documents")
 
 # ============================================================================
+# DATABASE & SERVICES (v2.0 multi-user)
+# ============================================================================
+
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://rag:rag_password@postgres:5432/rag_db")
+QDRANT_HOST = os.getenv("QDRANT_HOST", "qdrant")
+QDRANT_PORT = int(os.getenv("QDRANT_PORT", "6333"))
+REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
+
+# ============================================================================
 # CHUNKING PARAMETERS
 # ============================================================================
 
