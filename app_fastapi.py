@@ -144,6 +144,14 @@ def require_admin(user: User = Depends(get_current_user)) -> User:
     return user
 
 
+def get_admin_user_id(db: Session) -> int:
+    """Return the first admin user's ID for public queries. Raises 503 if none exists."""
+    admin = db.query(User).filter(User.is_admin == True).first()
+    if not admin:
+        raise HTTPException(status_code=503, detail="No admin account configured yet. Please set up an admin user.")
+    return admin.id
+
+
 # ============================================================================
 # REDIS / RQ SETUP
 # ============================================================================
@@ -170,6 +178,7 @@ class UserResponse(BaseModel):
     id: int
     username: str
     email: str
+    is_admin: bool
     created_at: datetime
 
     class Config:
@@ -307,21 +316,22 @@ async def get_me(user: User = Depends(get_current_user)):
 # ============================================================================
 
 @app.post("/api/chat", response_model=ChatResponse)
-async def chat(req: ChatRequest, user: User = Depends(get_current_user)):
-    """Query the RAG engine with per-user document isolation."""
+async def chat(req: ChatRequest, db: Session = Depends(get_db)):
+    """Public chat endpoint — queries admin's document collection."""
     if not req.question.strip():
         raise HTTPException(status_code=400, detail="Question cannot be empty")
+    admin_id = get_admin_user_id(db)
     try:
         result = await query_async(
             question=req.question,
-            user_id=user.id,
+            user_id=admin_id,
             chat_history=req.chat_history
         )
         return result
     except Exception as e:
-        logger.error(f"[CHAT] Error for user {user.id}: {e}")
+        logger.error(f"[CHAT] Error: {e}")
         if "connect" in str(e).lower():
-            raise HTTPException(status_code=503, detail="Cannot connect to Ollama. Make sure ollama serve is running.")
+            raise HTTPException(status_code=503, detail="Cannot connect to LLM. Please check provider settings.")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -330,9 +340,10 @@ async def chat(req: ChatRequest, user: User = Depends(get_current_user)):
 # ============================================================================
 
 @app.get("/api/library")
-async def get_library(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    """List user's indexed documents from PostgreSQL."""
-    docs = db.query(Document).filter(Document.user_id == user.id).order_by(Document.created_at.desc()).all()
+async def get_library(db: Session = Depends(get_db)):
+    """Public library — lists admin's indexed documents."""
+    admin_id = get_admin_user_id(db)
+    docs = db.query(Document).filter(Document.user_id == admin_id).order_by(Document.created_at.desc()).all()
     return {
         "documents": [
             {
@@ -359,7 +370,7 @@ async def add_source(
     title: str = Form(...),
     file: Optional[UploadFile] = File(None),
     url: Optional[str] = Form(None),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     """
@@ -463,7 +474,7 @@ async def add_source(
 @app.get("/api/sources/jobs/{job_id}")
 async def get_job_status(
     job_id: int,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_admin),
     db: Session = Depends(get_db)
 ):
     """Poll ingestion job status."""
@@ -510,7 +521,7 @@ async def get_job_status(
 @app.delete("/api/sources/{doc_id}")
 async def delete_source(
     doc_id: int,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_admin),
     db: Session = Depends(get_db)
 ):
     """Remove a document from Qdrant and PostgreSQL."""
@@ -542,7 +553,7 @@ async def delete_source(
 # ============================================================================
 
 @app.get("/api/settings")
-async def get_settings(user: User = Depends(get_current_user)):
+async def get_settings(user: User = Depends(require_admin)):
     """Return current user settings."""
     return {
         "user_id": user.id,
@@ -554,7 +565,7 @@ async def get_settings(user: User = Depends(get_current_user)):
 @app.post("/api/settings")
 async def update_settings(
     data: dict,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_admin),
     db: Session = Depends(get_db)
 ):
     """Update user profile settings."""

@@ -112,8 +112,15 @@
 
 {% block scripts %}
 <script>
-// Check auth
-if (!localStorage.getItem('rag_token')) window.location.href = '/login';
+// Require admin access
+(async () => {
+    const token = localStorage.getItem('rag_token');
+    if (!token) { window.location.href = '/login'; return; }
+    const resp = await fetch('/api/auth/me', { headers: { 'Authorization': `Bearer ${token}` } });
+    if (!resp.ok) { window.location.href = '/login'; return; }
+    const user = await resp.json();
+    if (!user.is_admin) { window.location.href = '/'; }
+})();
 
 // ---- File Upload ----
 document.getElementById('fileUploadForm').addEventListener('submit', async (e) => {
