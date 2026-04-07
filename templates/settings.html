@@ -5,43 +5,26 @@
 {% block content %}
 <div class="py-4" style="max-width: 700px;">
     <h2><i class="bi bi-gear"></i> Settings</h2>
-    <p class="text-muted">Configure local storage location.</p>
+    <p class="text-muted">Manage your account settings.</p>
 
-    <!-- Storage Location -->
+    <!-- User Profile -->
     <div class="card mb-4">
         <div class="card-header bg-secondary text-white">
-            <h5 class="mb-0"><i class="bi bi-folder"></i> Library Storage Location</h5>
+            <h5 class="mb-0"><i class="bi bi-person"></i> Account</h5>
         </div>
         <div class="card-body">
-            <p class="text-muted small">
-                Where ChromaDB and uploaded files are stored on your computer.
-                <strong>Restart the app after changing this.</strong>
-                Existing data will not be moved automatically.
-            </p>
-
             <div class="mb-3">
-                <label for="dataDirInput" class="form-label fw-bold">Data Directory</label>
-                <div class="input-group">
-                    <input type="text" class="form-control font-monospace" id="dataDirInput"
-                           placeholder="e.g., C:/Users/Landon/RAG/data">
-                    <button class="btn btn-success" id="saveDirBtn">
-                        <i class="bi bi-check-lg"></i> Save
-                    </button>
-                </div>
-                <div class="form-text">
-                    Leave blank to use the default <code>./data/</code> folder inside the project.
-                </div>
+                <label class="form-label">Username</label>
+                <input type="text" class="form-control" id="usernameDisplay" readonly>
             </div>
-
-            <div id="dirSaveStatus" style="display: none;"></div>
-
-            <!-- Current paths info -->
-            <div class="mt-3 p-3 bg-light rounded" id="pathsInfo">
-                <p class="mb-1 small text-muted"><strong>Current paths:</strong></p>
-                <p class="mb-1 small font-monospace" id="pathDataDir">Loading...</p>
-                <p class="mb-1 small text-muted">↳ <span class="font-monospace">chroma/</span> — vector database</p>
-                <p class="mb-0 small text-muted">↳ <span class="font-monospace">raw/uploads/</span> — uploaded files</p>
+            <div class="mb-3">
+                <label for="emailInput" class="form-label">Email</label>
+                <input type="email" class="form-control" id="emailInput">
             </div>
+            <button class="btn btn-primary" id="saveProfileBtn">
+                <i class="bi bi-check-lg"></i> Save Changes
+            </button>
+            <div id="profileStatus" class="mt-3" style="display: none;"></div>
         </div>
     </div>
 </div>
@@ -49,6 +32,9 @@
 
 {% block scripts %}
 <script>
+// Check auth
+if (!localStorage.getItem('rag_token')) window.location.href = '/login';
+
 // ---- Load current settings on page load ----
 async function init() {
     await loadSettings();
@@ -56,49 +42,56 @@ async function init() {
 
 async function loadSettings() {
     try {
-        const resp = await fetch('/api/settings');
+        const resp = await fetch('/api/settings', {
+            headers: { 'Authorization': `Bearer ${localStorage.getItem('rag_token')}` }
+        });
+        
+        if (resp.status === 401) {
+            window.location.href = '/login';
+            return;
+        }
+        
         const data = await resp.json();
-        document.getElementById('dataDirInput').value = data.data_dir || '';
-        document.getElementById('pathDataDir').textContent = data.data_dir || '(default ./data/)';
+        document.getElementById('usernameDisplay').value = data.username || '';
+        document.getElementById('emailInput').value = data.email || '';
     } catch (err) {
         console.error('Error loading settings:', err);
     }
 }
 
-// ---- Save data dir ----
-document.getElementById('saveDirBtn').addEventListener('click', async () => {
-    const dir = document.getElementById('dataDirInput').value.trim();
+// ---- Save profile ----
+document.getElementById('saveProfileBtn').addEventListener('click', async () => {
+    const email = document.getElementById('emailInput').value.trim();
 
     try {
         const resp = await fetch('/api/settings', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ data_dir: dir })
+            headers: { 
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${localStorage.getItem('rag_token')}`
+            },
+            body: JSON.stringify({ email })
         });
+        
+        if (resp.status === 401) {
+            window.location.href = '/login';
+            return;
+        }
+        
         const data = await resp.json();
-
-        const el = document.getElementById('dirSaveStatus');
+        const el = document.getElementById('profileStatus');
+        
         if (!resp.ok) {
-            el.innerHTML = `<div class="alert alert-danger mt-2">Error: ${data.error}</div>`;
+            el.innerHTML = `<div class="alert alert-danger">Error: ${data.detail || 'Update failed'}</div>`;
         } else {
-            const msg = dir
-                ? `✓ Data directory set to <strong>${dir}</strong>.`
-                : '✓ Data directory reset to default (<code>./data/</code>).';
-            el.innerHTML = `
-                <div class="alert alert-warning mt-2">
-                    ${msg}
-                    <strong>Restart the app for this to take effect.</strong>
-                    Existing data will not be moved automatically — copy the
-                    <code>chroma/</code> and <code>raw/</code> folders to the new location if needed.
-                </div>`;
-            document.getElementById('pathDataDir').textContent = dir || '(default ./data/)';
+            el.innerHTML = `<div class="alert alert-success">✓ Profile updated successfully.</div>`;
         }
         el.style.display = 'block';
 
     } catch (err) {
-        document.getElementById('dirSaveStatus').innerHTML =
-            `<div class="alert alert-danger mt-2">Error: ${err.message}</div>`;
-        document.getElementById('dirSaveStatus').style.display = 'block';
+        document.getElementById('profileStatus').innerHTML =
+            `<div class="alert alert-danger">Error: ${err.message}</div>`;
+        document.getElementById('profileStatus').style.display = 'block';
     }
 });
 
