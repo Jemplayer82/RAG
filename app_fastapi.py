@@ -58,7 +58,10 @@ from config import (
     OLLAMA_BASE_URL, LLM_MODEL, EMBED_MODEL,
     DEBUG, CACHE_ROOT, REDIS_URL
 )
-from models import User, Document, IngestionJob, get_session_local, init_db
+from models import (
+    User, Document, IngestionJob, LLMProviderConfig,
+    get_session_local, init_db, encrypt_api_key
+)
 from rag_async import query_async
 from ingest_async import QdrantManager, run_ingestion_job
 
@@ -135,6 +138,12 @@ def get_current_user(
     return user
 
 
+def require_admin(user: User = Depends(get_current_user)) -> User:
+    if not user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return user
+
+
 # ============================================================================
 # REDIS / RQ SETUP
 # ============================================================================
@@ -175,6 +184,16 @@ class Token(BaseModel):
 class ChatRequest(BaseModel):
     question: str
     chat_history: Optional[list] = []
+
+
+class LLMSettingsUpdate(BaseModel):
+    provider: str
+    model: str
+    api_key: Optional[str] = None
+    base_url: Optional[str] = None
+    temperature: float = 0.3
+    top_p: float = 0.9
+    max_tokens: int = 2048
 
 
 class ChatResponse(BaseModel):
@@ -543,6 +562,98 @@ async def update_settings(
         user.email = data["email"].strip()
         db.commit()
     return {"status": "updated"}
+
+
+# ============================================================================
+# ROUTES: Admin — LLM Provider Settings
+# ============================================================================
+
+@app.get("/admin/llm-settings")
+async def admin_llm_page(request: Request, user: User = Depends(require_admin)):
+    return templates.TemplateResponse(
+        "admin_llm_settings.html", {"request": request, "user": user}
+    )
+
+
+@app.get("/api/admin/llm-settings")
+async def get_llm_settings(
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db)
+):
+    config = db.query(LLMProviderConfig).first()
+    if not config:
+        return {
+            "provider": "ollama",
+            "model": LLM_MODEL,
+            "base_url": OLLAMA_BASE_URL,
+            "temperature": 0.3,
+            "top_p": 0.9,
+            "max_tokens": 2048,
+            "has_api_key": False,
+        }
+    return {
+        "id": config.id,
+        "provider": config.provider,
+        "model": config.model,
+        "base_url": config.base_url or "",
+        "temperature": config.temperature,
+        "top_p": config.top_p,
+        "max_tokens": config.max_tokens,
+        "has_api_key": bool(config.api_key),
+        "updated_at": config.updated_at.isoformat() if config.updated_at else None,
+    }
+
+
+@app.post("/api/admin/llm-settings")
+async def update_llm_settings(
+    data: LLMSettingsUpdate,
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db)
+):
+    config = db.query(LLMProviderConfig).first()
+    if not config:
+        config = LLMProviderConfig()
+        db.add(config)
+
+    config.provider = data.provider
+    config.model = data.model
+    config.base_url = data.base_url or ""
+    config.temperature = data.temperature
+    config.top_p = data.top_p
+    config.max_tokens = data.max_tokens
+    config.updated_by_id = user.id
+
+    if data.api_key:
+        config.api_key = encrypt_api_key(data.api_key)
+
+    db.commit()
+    logger.info(f"[ADMIN] LLM config updated by {user.username}: provider={data.provider} model={data.model}")
+    return {"status": "updated", "provider": data.provider, "model": data.model}
+
+
+@app.post("/api/admin/llm-settings/test")
+async def test_llm_connection(
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db)
+):
+    from llm_provider import query_llm_async
+    config_row = db.query(LLMProviderConfig).first()
+    config = None
+    if config_row:
+        config = {
+            "provider": config_row.provider,
+            "model": config_row.model,
+            "api_key": config_row.api_key or "",
+            "base_url": config_row.base_url or "",
+            "temperature": config_row.temperature,
+            "top_p": config_row.top_p,
+            "max_tokens": 64,
+        }
+    try:
+        response = await query_llm_async("Reply with only: OK", config)
+        return {"status": "ok", "response": response[:200]}
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"LLM connection failed: {e}")
 
 
 # ============================================================================

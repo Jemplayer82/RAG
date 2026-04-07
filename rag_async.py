@@ -2,7 +2,7 @@
 Async RAG Query Engine for v2.0 multi-user system.
 - Retrieves from Qdrant (per-user collection) instead of ChromaDB
 - Re-ranks with BM25 (same as v1.0)
-- Calls Ollama via httpx (async HTTP)
+- Routes LLM calls through llm_provider.py (supports OpenAI, Anthropic, Ollama, generic)
 - Per-user namespace isolation
 """
 
@@ -10,13 +10,11 @@ import asyncio
 import logging
 from typing import Dict, List, Optional
 
-import httpx
 from rank_bm25 import BM25Okapi
 from sentence_transformers import SentenceTransformer
 
 from config import (
     EMBED_MODEL, EMBED_DEVICE,
-    OLLAMA_BASE_URL, LLM_MODEL,
     TOP_K, RERANK_TOP_K,
     RAG_PROMPT_TEMPLATE
 )
@@ -83,26 +81,34 @@ def _retrieve_sources_sync(question: str, user_id: int, k: int = TOP_K) -> List[
 
 
 # ============================================================================
-# LLM: Async Ollama call via httpx
+# LLM: Route through configured provider
 # ============================================================================
 
-async def _call_ollama_async(prompt: str) -> str:
-    """Call Ollama API asynchronously using httpx."""
-    async with httpx.AsyncClient(timeout=120) as client:
-        response = await client.post(
-            f"{OLLAMA_BASE_URL}/api/generate",
-            json={
-                "model": LLM_MODEL,
-                "prompt": prompt,
-                "stream": False,
-                "options": {
-                    "temperature": 0.3,
-                    "top_p": 0.9,
-                }
-            }
-        )
-        response.raise_for_status()
-        return response.json().get("response", "")
+async def _call_llm_async(prompt: str) -> str:
+    """Call the admin-configured LLM provider (falls back to env vars)."""
+    from llm_provider import query_llm_async
+    from models import LLMProviderConfig, get_session_local
+
+    SessionLocal = get_session_local()
+    db = SessionLocal()
+    try:
+        config_row = db.query(LLMProviderConfig).first()
+    finally:
+        db.close()
+
+    config = None
+    if config_row:
+        config = {
+            "provider": config_row.provider,
+            "model": config_row.model,
+            "api_key": config_row.api_key or "",
+            "base_url": config_row.base_url or "",
+            "temperature": config_row.temperature,
+            "top_p": config_row.top_p,
+            "max_tokens": config_row.max_tokens,
+        }
+
+    return await query_llm_async(prompt, config)
 
 
 # ============================================================================
@@ -134,7 +140,7 @@ async def query_async(
         return {
             "answer": "I could not find relevant documents to answer your question. Please add documents via the Add Sources page and try again.",
             "sources": [],
-            "metadata": {"retrieval_count": 0, "embedder": EMBED_MODEL}
+            "metadata": {"retrieval_count": 0, "embedder": EMBED_MODEL, "llm": "n/a"}
         }
 
     # Build context
@@ -162,8 +168,8 @@ async def query_async(
         question=question
     )
 
-    # Call LLM asynchronously
-    answer = await _call_ollama_async(prompt)
+    # Call LLM via configured provider
+    answer = await _call_llm_async(prompt)
 
     return {
         "answer": answer,

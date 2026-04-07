@@ -1,0 +1,267 @@
+{% extends "base.html" %}
+
+{% block title %}LLM Provider Settings — Admin{% endblock %}
+
+{% block content %}
+<div class="py-4">
+  <div class="d-flex align-items-center mb-4">
+    <div>
+      <h2 class="mb-0"><i class="bi bi-cpu me-2"></i>LLM Provider Settings</h2>
+      <p class="text-muted mb-0">Configure the AI provider used by all users</p>
+    </div>
+    <span class="badge bg-danger ms-3">Admin Only</span>
+  </div>
+
+  <div id="alertBox" class="alert d-none mb-4" role="alert"></div>
+
+  <div class="row">
+    <div class="col-lg-7">
+      <div class="card shadow-sm">
+        <div class="card-body p-4">
+          <form id="settingsForm">
+
+            <!-- Provider -->
+            <div class="mb-4">
+              <label for="provider" class="form-label fw-semibold">AI Provider</label>
+              <select class="form-select" id="provider" name="provider" required>
+                <option value="ollama">Ollama (Local / Remote)</option>
+                <option value="openai">OpenAI (GPT-4, GPT-3.5, etc.)</option>
+                <option value="anthropic">Anthropic (Claude)</option>
+                <option value="generic">Generic HTTP (Groq, Together, Fireworks…)</option>
+              </select>
+            </div>
+
+            <!-- Model -->
+            <div class="mb-4">
+              <label for="model" class="form-label fw-semibold">Model Name</label>
+              <input type="text" class="form-control" id="model" name="model" required
+                     placeholder="e.g. gpt-4o, claude-3-5-sonnet-20241022, mistral-small3.1">
+              <div id="modelHint" class="form-text"></div>
+            </div>
+
+            <!-- Base URL (Ollama / Generic) -->
+            <div class="mb-4" id="baseUrlGroup">
+              <label for="baseUrl" class="form-label fw-semibold">Base URL</label>
+              <input type="text" class="form-control" id="baseUrl" name="base_url"
+                     placeholder="http://localhost:11434">
+              <div class="form-text">Endpoint for Ollama or OpenAI-compatible providers.</div>
+            </div>
+
+            <!-- API Key (OpenAI / Anthropic / Generic) -->
+            <div class="mb-4 d-none" id="apiKeyGroup">
+              <label for="apiKey" class="form-label fw-semibold">API Key</label>
+              <div class="input-group">
+                <input type="password" class="form-control" id="apiKey" name="api_key"
+                       placeholder="Leave blank to keep the current key">
+                <button class="btn btn-outline-secondary" type="button" id="toggleKey">
+                  <i class="bi bi-eye"></i>
+                </button>
+              </div>
+              <div class="form-text">Stored encrypted in the database.</div>
+              <div id="keyStatus" class="form-text text-success d-none">
+                <i class="bi bi-check-circle me-1"></i>An API key is already saved.
+              </div>
+            </div>
+
+            <hr class="my-4">
+
+            <!-- Tuning parameters -->
+            <div class="row g-3 mb-4">
+              <div class="col-md-4">
+                <label for="temperature" class="form-label fw-semibold">Temperature</label>
+                <input type="number" class="form-control" id="temperature" name="temperature"
+                       value="0.3" min="0" max="2" step="0.05">
+                <div class="form-text">0 = deterministic, 2 = creative</div>
+              </div>
+              <div class="col-md-4">
+                <label for="topP" class="form-label fw-semibold">Top P</label>
+                <input type="number" class="form-control" id="topP" name="top_p"
+                       value="0.9" min="0" max="1" step="0.05">
+              </div>
+              <div class="col-md-4">
+                <label for="maxTokens" class="form-label fw-semibold">Max Tokens</label>
+                <input type="number" class="form-control" id="maxTokens" name="max_tokens"
+                       value="2048" min="256" max="32000" step="256">
+              </div>
+            </div>
+
+            <div class="d-flex gap-2">
+              <button type="submit" class="btn btn-primary px-4">
+                <i class="bi bi-save me-1"></i>Save Settings
+              </button>
+              <button type="button" class="btn btn-outline-secondary" id="testBtn">
+                <i class="bi bi-lightning me-1"></i>Test Connection
+              </button>
+            </div>
+
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <!-- Info sidebar -->
+    <div class="col-lg-4 mt-4 mt-lg-0">
+      <div class="card shadow-sm mb-3">
+        <div class="card-header fw-semibold"><i class="bi bi-info-circle me-1"></i>Model Suggestions</div>
+        <div class="card-body small">
+          <p class="mb-1"><strong>OpenAI</strong></p>
+          <ul class="mb-2">
+            <li>gpt-4o</li>
+            <li>gpt-4-turbo</li>
+            <li>gpt-3.5-turbo</li>
+          </ul>
+          <p class="mb-1"><strong>Anthropic</strong></p>
+          <ul class="mb-2">
+            <li>claude-3-5-sonnet-20241022</li>
+            <li>claude-3-opus-20240229</li>
+            <li>claude-3-haiku-20240307</li>
+          </ul>
+          <p class="mb-1"><strong>Ollama</strong></p>
+          <ul class="mb-2">
+            <li>mistral-small3.1</li>
+            <li>llama3.1</li>
+            <li>gemma2</li>
+          </ul>
+          <p class="mb-1"><strong>Groq (Generic)</strong></p>
+          <ul class="mb-0">
+            <li>Base URL: https://api.groq.com/openai/v1/chat/completions</li>
+            <li>llama-3.1-70b-versatile</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="card shadow-sm">
+        <div class="card-header fw-semibold"><i class="bi bi-shield-lock me-1"></i>Security</div>
+        <div class="card-body small text-muted">
+          API keys are encrypted with Fernet symmetric encryption before being stored in the database.
+          Set <code>ENCRYPTION_KEY</code> in your <code>.env</code> to a stable 44-character Fernet key.
+          Generate one with:
+          <pre class="mt-2 mb-0 p-2 bg-light rounded">python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"</pre>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const token = localStorage.getItem('rag_token');
+if (!token) { window.location.href = '/login'; }
+
+const providerEl   = document.getElementById('provider');
+const modelEl      = document.getElementById('model');
+const baseUrlGroup = document.getElementById('baseUrlGroup');
+const apiKeyGroup  = document.getElementById('apiKeyGroup');
+const keyStatus    = document.getElementById('keyStatus');
+const alertBox     = document.getElementById('alertBox');
+const modelHint    = document.getElementById('modelHint');
+
+const MODEL_HINTS = {
+  openai:    'e.g. gpt-4o, gpt-4-turbo, gpt-3.5-turbo',
+  anthropic: 'e.g. claude-3-5-sonnet-20241022, claude-3-opus-20240229',
+  ollama:    'e.g. mistral-small3.1, llama3.1, gemma2',
+  generic:   'Model name passed to your provider\'s API',
+};
+
+function updateFieldVisibility() {
+  const p = providerEl.value;
+  baseUrlGroup.classList.toggle('d-none', p === 'openai' || p === 'anthropic');
+  apiKeyGroup.classList.toggle('d-none', p === 'ollama');
+  modelHint.textContent = MODEL_HINTS[p] || '';
+}
+
+providerEl.addEventListener('change', updateFieldVisibility);
+
+// Toggle API key visibility
+document.getElementById('toggleKey').addEventListener('click', () => {
+  const input = document.getElementById('apiKey');
+  const icon  = document.querySelector('#toggleKey i');
+  if (input.type === 'password') {
+    input.type = 'text';
+    icon.className = 'bi bi-eye-slash';
+  } else {
+    input.type = 'password';
+    icon.className = 'bi bi-eye';
+  }
+});
+
+function showAlert(msg, type = 'success') {
+  alertBox.className = `alert alert-${type}`;
+  alertBox.textContent = msg;
+  alertBox.classList.remove('d-none');
+  setTimeout(() => alertBox.classList.add('d-none'), 5000);
+}
+
+async function loadSettings() {
+  try {
+    const resp = await fetch('/api/admin/llm-settings', {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (resp.status === 403) {
+      document.body.innerHTML = '<div class="container py-5"><div class="alert alert-danger">Access denied — admin only.</div></div>';
+      return;
+    }
+    if (!resp.ok) return;
+    const data = await resp.json();
+
+    providerEl.value = data.provider || 'ollama';
+    modelEl.value    = data.model    || '';
+    document.getElementById('baseUrl').value     = data.base_url   || '';
+    document.getElementById('temperature').value = data.temperature ?? 0.3;
+    document.getElementById('topP').value        = data.top_p       ?? 0.9;
+    document.getElementById('maxTokens').value   = data.max_tokens  ?? 2048;
+
+    if (data.has_api_key) keyStatus.classList.remove('d-none');
+    updateFieldVisibility();
+  } catch (err) {
+    console.error('Failed to load settings:', err);
+  }
+}
+
+document.getElementById('settingsForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  const body = {
+    provider:    fd.get('provider'),
+    model:       fd.get('model'),
+    base_url:    fd.get('base_url') || null,
+    temperature: parseFloat(fd.get('temperature')),
+    top_p:       parseFloat(fd.get('top_p')),
+    max_tokens:  parseInt(fd.get('max_tokens')),
+  };
+  const apiKey = fd.get('api_key');
+  if (apiKey) body.api_key = apiKey;
+
+  const resp = await fetch('/api/admin/llm-settings', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (resp.ok) {
+    showAlert('Settings saved successfully.');
+    loadSettings();
+  } else {
+    const err = await resp.json().catch(() => ({}));
+    showAlert(err.detail || 'Error saving settings.', 'danger');
+  }
+});
+
+document.getElementById('testBtn').addEventListener('click', async () => {
+  const resp = await fetch('/api/admin/llm-settings/test', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${token}` }
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (resp.ok) {
+    showAlert(`Connection OK — response: "${data.response}"`, 'success');
+  } else {
+    showAlert(data.detail || 'Connection test failed.', 'danger');
+  }
+});
+
+loadSettings();
+</script>
+{% endblock %}
