@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Login - RAG Assistant{% endblock %}
+{% block content %}
+<div class="row justify-content-center mt-5">
+    <div class="col-md-4">
+        <div class="card shadow">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0"><i class="bi bi-box-arrow-in-right"></i> Login</h5>
+            </div>
+            <div class="card-body">
+                <form id="loginForm">
+                    <div class="mb-3">
+                        <label class="form-label">Username</label>
+                        <input type="text" class="form-control" id="username" required autofocus>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Password</label>
+                        <input type="password" class="form-control" id="password" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary w-100">Login</button>
+                </form>
+                <div id="loginError" class="alert alert-danger mt-3" style="display:none;"></div>
+                <hr>
+                <p class="text-center mb-0">No account? <a href="/register">Register</a></p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+document.getElementById('loginForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const username = document.getElementById('username').value;
+    const password = document.getElementById('password').value;
+
+    const formData = new URLSearchParams();
+    formData.append('username', username);
+    formData.append('password', password);
+
+    const resp = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: formData
+    });
+
+    if (resp.ok) {
+        const data = await resp.json();
+        localStorage.setItem('rag_token', data.access_token);
+        window.location.href = '/';
+    } else {
+        const err = await resp.json();
+        const el = document.getElementById('loginError');
+        el.textContent = err.detail || 'Login failed';
+        el.style.display = 'block';
+    }
+});
+</script>
+{% endblock %}

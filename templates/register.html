@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Register - RAG Assistant{% endblock %}
+{% block content %}
+<div class="row justify-content-center mt-5">
+    <div class="col-md-4">
+        <div class="card shadow">
+            <div class="card-header bg-success text-white">
+                <h5 class="mb-0"><i class="bi bi-person-plus"></i> Create Account</h5>
+            </div>
+            <div class="card-body">
+                <form id="registerForm">
+                    <div class="mb-3">
+                        <label class="form-label">Username</label>
+                        <input type="text" class="form-control" id="username" required autofocus>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Email</label>
+                        <input type="email" class="form-control" id="email" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Password</label>
+                        <input type="password" class="form-control" id="password" required minlength="8">
+                    </div>
+                    <button type="submit" class="btn btn-success w-100">Create Account</button>
+                </form>
+                <div id="registerError" class="alert alert-danger mt-3" style="display:none;"></div>
+                <div id="registerSuccess" class="alert alert-success mt-3" style="display:none;"></div>
+                <hr>
+                <p class="text-center mb-0">Already registered? <a href="/login">Login</a></p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+document.getElementById('registerForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const body = {
+        username: document.getElementById('username').value,
+        email: document.getElementById('email').value,
+        password: document.getElementById('password').value,
+    };
+
+    const resp = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+    });
+
+    if (resp.ok) {
+        document.getElementById('registerSuccess').textContent = 'Account created! Redirecting to login...';
+        document.getElementById('registerSuccess').style.display = 'block';
+        setTimeout(() => window.location.href = '/login', 1500);
+    } else {
+        const err = await resp.json();
+        const el = document.getElementById('registerError');
+        el.textContent = err.detail || 'Registration failed';
+        el.style.display = 'block';
+    }
+});
+</script>
+{% endblock %}

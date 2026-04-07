@@ -112,6 +112,9 @@
 
 {% block scripts %}
 <script>
+// Check auth
+if (!localStorage.getItem('rag_token')) window.location.href = '/login';
+
 // ---- File Upload ----
 document.getElementById('fileUploadForm').addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -133,13 +136,25 @@ document.getElementById('fileUploadForm').addEventListener('submit', async (e) =
         formData.append('title', title);
         formData.append('file', file);
 
-        // Do NOT set Content-Type manually — browser sets multipart boundary
-        const response = await fetch('/api/sources', { method: 'POST', body: formData });
+        const response = await fetch('/api/sources', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${localStorage.getItem('rag_token')}` },
+            body: formData
+        });
+
+        if (response.status === 401) {
+            window.location.href = '/login';
+            return;
+        }
+
         const data = await response.json();
 
-        if (!response.ok) throw new Error(data.error || 'Upload failed');
+        if (!response.ok) throw new Error(data.detail || 'Upload failed');
 
-        showStatus('file', 'success', `✓ Added "${data.title}" (${data.chunks} chunks)`);
+        if (data.job_id) {
+            await pollJobStatus('file', data.job_id);
+        }
+
         document.getElementById('fileUploadForm').reset();
         loadSources();
 
@@ -162,14 +177,26 @@ document.getElementById('urlForm').addEventListener('submit', async (e) => {
     try {
         const response = await fetch('/api/sources', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${localStorage.getItem('rag_token')}`
+            },
             body: JSON.stringify({ type: 'url', url, title })
         });
+
+        if (response.status === 401) {
+            window.location.href = '/login';
+            return;
+        }
+
         const data = await response.json();
 
-        if (!response.ok) throw new Error(data.error || 'Fetch failed');
+        if (!response.ok) throw new Error(data.detail || 'Fetch failed');
 
-        showStatus('url', 'success', `✓ Added "${data.title}" (${data.chunks} chunks)`);
+        if (data.job_id) {
+            await pollJobStatus('url', data.job_id);
+        }
+
         document.getElementById('urlForm').reset();
         loadSources();
 
@@ -178,52 +205,100 @@ document.getElementById('urlForm').addEventListener('submit', async (e) => {
     }
 });
 
+// ---- Job Polling ----
+async function pollJobStatus(prefix, jobId) {
+    showStatus(prefix, 'progress', `Processing document (job #${jobId})...`);
+    
+    return new Promise((resolve, reject) => {
+        const poll = setInterval(async () => {
+            try {
+                const r = await fetch(`/api/sources/jobs/${jobId}`, {
+                    headers: { 'Authorization': `Bearer ${localStorage.getItem('rag_token')}` }
+                });
+
+                if (r.status === 401) {
+                    clearInterval(poll);
+                    window.location.href = '/login';
+                    return;
+                }
+
+                const job = await r.json();
+                
+                if (job.status === 'complete') {
+                    clearInterval(poll);
+                    showStatus(prefix, 'success', `✓ Document added successfully!`);
+                    resolve();
+                } else if (job.status === 'error') {
+                    clearInterval(poll);
+                    showStatus(prefix, 'error', `Error: ${job.error_msg || 'Processing failed'}`);
+                    reject(new Error(job.error_msg));
+                }
+            } catch (err) {
+                clearInterval(poll);
+                reject(err);
+            }
+        }, 2000);
+    });
+}
+
 function showStatus(prefix, state, message) {
-    document.getElementById(`${prefix}Progress`).style.display = state === 'progress' ? 'block' : 'none';
+    const progressEl = document.getElementById(`${prefix}Progress`);
     const successEl = document.getElementById(`${prefix}Success`);
     const errorEl = document.getElementById(`${prefix}Error`);
 
-    if (state === 'success') {
+    if (state === 'progress') {
+        progressEl.style.display = 'block';
+        if (message) progressEl.innerHTML = `<div class="spinner-border spinner-border-sm me-2" role="status"></div> ${message}`;
+        successEl.style.display = 'none';
+        errorEl.style.display = 'none';
+    } else if (state === 'success') {
+        progressEl.style.display = 'none';
         successEl.textContent = message;
         successEl.style.display = 'block';
         errorEl.style.display = 'none';
     } else if (state === 'error') {
+        progressEl.style.display = 'none';
         errorEl.textContent = message;
         errorEl.style.display = 'block';
         successEl.style.display = 'none';
-    } else {
-        successEl.style.display = 'none';
-        errorEl.style.display = 'none';
     }
 }
 
 // ---- Manage Sources ----
 async function loadSources() {
     try {
-        const response = await fetch('/api/sources');
+        const response = await fetch('/api/library', {
+            headers: { 'Authorization': `Bearer ${localStorage.getItem('rag_token')}` }
+        });
+
+        if (response.status === 401) {
+            window.location.href = '/login';
+            return;
+        }
+
         const data = await response.json();
         const container = document.getElementById('sourcesList');
 
-        if (!data.sources || data.sources.length === 0) {
+        if (!data.documents || data.documents.length === 0) {
             container.innerHTML = '<p class="text-muted">No user-added sources yet.</p>';
             return;
         }
 
         let html = '<div class="list-group">';
-        for (const source of data.sources) {
-            const label = source.title || source.url || source.id;
-            const badge = source.type === 'pdf' ? 'bg-primary'
-                        : source.type === 'txt' ? 'bg-success'
+        for (const doc of data.documents) {
+            const label = doc.title || doc.url || doc.id;
+            const badge = doc.doc_type === 'pdf' ? 'bg-primary'
+                        : doc.doc_type === 'txt' ? 'bg-success'
                         : 'bg-warning';
             html += `
                 <div class="list-group-item d-flex justify-content-between align-items-center">
                     <div>
-                        <span class="badge ${badge} me-2">${source.type}</span>
+                        <span class="badge ${badge} me-2">${doc.doc_type}</span>
                         <strong>${label}</strong>
                         <br>
-                        <small class="text-muted">${source.chunks || 0} chunks · Added ${source.added ? source.added.substring(0,10) : 'unknown'}</small>
+                        <small class="text-muted">${doc.chunks || 0} chunks · Added ${doc.created_at ? doc.created_at.substring(0,10) : 'unknown'}</small>
                     </div>
-                    <button class="btn btn-sm btn-outline-danger delete-source" data-id="${source.id}">
+                    <button class="btn btn-sm btn-outline-danger delete-source" data-id="${doc.id}">
                         <i class="bi bi-trash"></i> Remove
                     </button>
                 </div>
@@ -246,12 +321,21 @@ async function loadSources() {
 
 async function deleteSource(id) {
     try {
-        const response = await fetch(`/api/sources/${id}`, { method: 'DELETE' });
+        const response = await fetch(`/api/sources/${id}`, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${localStorage.getItem('rag_token')}` }
+        });
+
+        if (response.status === 401) {
+            window.location.href = '/login';
+            return;
+        }
+
         if (response.ok) {
             loadSources();
         } else {
             const data = await response.json();
-            alert('Error: ' + (data.error || 'Unknown error'));
+            alert('Error: ' + (data.detail || 'Unknown error'));
         }
     } catch (err) {
         alert('Error removing source: ' + err.message);
