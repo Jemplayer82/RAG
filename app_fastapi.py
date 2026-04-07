@@ -568,10 +568,11 @@ async def update_settings(
 # ROUTES: Admin — LLM Provider Settings
 # ============================================================================
 
-@app.get("/admin/llm-settings")
-async def admin_llm_page(request: Request, user: User = Depends(require_admin)):
+@app.get("/admin/llm-settings", response_class=HTMLResponse)
+async def admin_llm_page(request: Request):
+    # Auth is handled client-side via JWT in localStorage
     return templates.TemplateResponse(
-        "admin_llm_settings.html", {"request": request, "user": user}
+        "admin_llm_settings.html", {"request": request}
     )
 
 
