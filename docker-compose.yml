@@ -30,7 +30,7 @@ services:
       - redis_data:/data
     restart: unless-stopped
 
-    rag:
+  rag:
     build: .
     ports:
       - "8000:8000"
@@ -50,7 +50,7 @@ services:
         condition: service_started
     restart: unless-stopped
 
-    rag-worker:
+  rag-worker:
     build: .
     command: ["python", "worker.py"]
     env_file: .env
