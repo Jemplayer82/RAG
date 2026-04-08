@@ -237,6 +237,13 @@ async function pollJobStatus(prefix, jobId) {
                     resolve();
                 } else if (job.status === 'error') {
                     clearInterval(poll);
+                    // Auto-delete the failed document record
+                    if (job.document_id) {
+                        await fetch(`/api/sources/${job.document_id}`, {
+                            method: 'DELETE',
+                            headers: { 'Authorization': `Bearer ${localStorage.getItem('rag_token')}` }
+                        }).catch(() => {});
+                    }
                     showStatus(prefix, 'error', `Error: ${job.error_msg || 'Processing failed'}`);
                     reject(new Error(job.error_msg));
                 }
@@ -291,8 +298,16 @@ async function loadSources() {
             return;
         }
 
+        // Filter out failed/empty docs
+        const validDocs = data.documents.filter(d => d.chunks > 0);
+
+        if (validDocs.length === 0) {
+            container.innerHTML = '<p class="text-muted">No user-added sources yet.</p>';
+            return;
+        }
+
         let html = '<div class="list-group">';
-        for (const doc of data.documents) {
+        for (const doc of validDocs) {
             const label = doc.title || doc.url || doc.id;
             const badge = doc.doc_type === 'pdf' ? 'bg-primary'
                         : doc.doc_type === 'txt' ? 'bg-success'
@@ -303,7 +318,7 @@ async function loadSources() {
                         <span class="badge ${badge} me-2">${doc.doc_type}</span>
                         <strong>${label}</strong>
                         <br>
-                        <small class="text-muted">${doc.chunks || 0} chunks · Added ${doc.created_at ? doc.created_at.substring(0,10) : 'unknown'}</small>
+                        <small class="text-muted">Added ${doc.created_at ? doc.created_at.substring(0,10) : 'unknown'}</small>
                     </div>
                     <button class="btn btn-sm btn-outline-danger delete-source" data-id="${doc.id}">
                         <i class="bi bi-trash"></i> Remove

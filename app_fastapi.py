@@ -511,6 +511,7 @@ async def get_job_status(
 
     return {
         "job_id": job.id,
+        "document_id": job.document_id,
         "status": job.status,
         "error": job.error_msg,
         "created_at": job.created_at.isoformat(),
