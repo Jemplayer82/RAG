@@ -50,9 +50,15 @@
                         </button>
                     </form>
 
-                    <div id="fileProgress" class="alert alert-info mt-3" style="display: none;">
-                        <div class="spinner-border spinner-border-sm me-2" role="status"></div>
-                        Uploading and ingesting file...
+                    <div id="fileProgress" class="mt-3" style="display: none;">
+                        <div class="mb-1 d-flex justify-content-between">
+                            <small id="fileProgressLabel" class="text-muted">Uploading...</small>
+                            <small id="fileProgressPct" class="text-muted">0%</small>
+                        </div>
+                        <div class="progress" style="height: 8px;">
+                            <div id="fileProgressBar" class="progress-bar progress-bar-striped progress-bar-animated"
+                                 role="progressbar" style="width: 0%"></div>
+                        </div>
                     </div>
                     <div id="fileSuccess" class="alert alert-success mt-3" style="display: none;"></div>
                     <div id="fileError" class="alert alert-danger mt-3" style="display: none;"></div>
@@ -82,9 +88,15 @@
                         </button>
                     </form>
 
-                    <div id="urlProgress" class="alert alert-info mt-3" style="display: none;">
-                        <div class="spinner-border spinner-border-sm me-2" role="status"></div>
-                        Fetching and ingesting URL...
+                    <div id="urlProgress" class="mt-3" style="display: none;">
+                        <div class="mb-1 d-flex justify-content-between">
+                            <small id="urlProgressLabel" class="text-muted">Fetching...</small>
+                            <small id="urlProgressPct" class="text-muted">0%</small>
+                        </div>
+                        <div class="progress" style="height: 8px;">
+                            <div id="urlProgressBar" class="progress-bar progress-bar-striped progress-bar-animated"
+                                 role="progressbar" style="width: 0%"></div>
+                        </div>
                     </div>
                     <div id="urlSuccess" class="alert alert-success mt-3" style="display: none;"></div>
                     <div id="urlError" class="alert alert-danger mt-3" style="display: none;"></div>
@@ -135,7 +147,8 @@ document.getElementById('fileUploadForm').addEventListener('submit', async (e) =
     const ext = file.name.split('.').pop().toLowerCase();
     const type = ext === 'pdf' ? 'pdf' : 'txt';
 
-    showStatus('file', 'progress');
+    showStatus('file', 'progress', 'Uploading file...');
+    setProgress('file', 5, 'Uploading file...');
 
     try {
         const formData = new FormData();
@@ -179,7 +192,8 @@ document.getElementById('urlForm').addEventListener('submit', async (e) => {
 
     if (!url || !title) return;
 
-    showStatus('url', 'progress');
+    showStatus('url', 'progress', 'Submitting URL...');
+    setProgress('url', 5, 'Submitting URL...');
 
     try {
         const response = await fetch('/api/sources', {
@@ -214,8 +228,18 @@ document.getElementById('urlForm').addEventListener('submit', async (e) => {
 
 // ---- Job Polling ----
 async function pollJobStatus(prefix, jobId) {
-    showStatus(prefix, 'progress', `Processing document (job #${jobId})...`);
-    
+    showStatus(prefix, 'progress', 'Queued...');
+    setProgress(prefix, 10, 'Queued...');
+
+    // Slowly animate bar to 80% while waiting
+    let fakePct = 10;
+    const ticker = setInterval(() => {
+        if (fakePct < 75) {
+            fakePct += Math.random() * 4;
+            setProgress(prefix, Math.round(fakePct), 'Processing...');
+        }
+    }, 800);
+
     return new Promise((resolve, reject) => {
         const poll = setInterval(async () => {
             try {
@@ -224,20 +248,28 @@ async function pollJobStatus(prefix, jobId) {
                 });
 
                 if (r.status === 401) {
-                    clearInterval(poll);
+                    clearInterval(poll); clearInterval(ticker);
                     window.location.href = '/login';
                     return;
                 }
 
                 const job = await r.json();
-                
-                if (job.status === 'complete') {
-                    clearInterval(poll);
-                    showStatus(prefix, 'success', `✓ Document added successfully!`);
+
+                if (job.status === 'running') {
+                    setProgress(prefix, Math.max(fakePct, 50), 'Embedding chunks...');
+                } else if (job.status === 'complete') {
+                    clearInterval(poll); clearInterval(ticker);
+                    setProgress(prefix, 100, 'Complete!');
+                    // Remove animated stripe, turn green
+                    const bar = document.getElementById(`${prefix}ProgressBar`);
+                    bar.classList.remove('progress-bar-striped', 'progress-bar-animated');
+                    bar.classList.add('bg-success');
+                    setTimeout(() => {
+                        showStatus(prefix, 'success', '✓ Document added successfully!');
+                    }, 400);
                     resolve();
                 } else if (job.status === 'error') {
-                    clearInterval(poll);
-                    // Auto-delete the failed document record
+                    clearInterval(poll); clearInterval(ticker);
                     if (job.document_id) {
                         await fetch(`/api/sources/${job.document_id}`, {
                             method: 'DELETE',
@@ -248,33 +280,39 @@ async function pollJobStatus(prefix, jobId) {
                     reject(new Error(job.error_msg));
                 }
             } catch (err) {
-                clearInterval(poll);
+                clearInterval(poll); clearInterval(ticker);
                 reject(err);
             }
         }, 2000);
     });
 }
 
+function setProgress(prefix, pct, label) {
+    document.getElementById(`${prefix}ProgressBar`).style.width = pct + '%';
+    document.getElementById(`${prefix}ProgressPct`).textContent = pct + '%';
+    if (label) document.getElementById(`${prefix}ProgressLabel`).textContent = label;
+}
+
 function showStatus(prefix, state, message) {
     const progressEl = document.getElementById(`${prefix}Progress`);
-    const successEl = document.getElementById(`${prefix}Success`);
-    const errorEl = document.getElementById(`${prefix}Error`);
+    const successEl  = document.getElementById(`${prefix}Success`);
+    const errorEl    = document.getElementById(`${prefix}Error`);
 
     if (state === 'progress') {
         progressEl.style.display = 'block';
-        if (message) progressEl.innerHTML = `<div class="spinner-border spinner-border-sm me-2" role="status"></div> ${message}`;
-        successEl.style.display = 'none';
-        errorEl.style.display = 'none';
+        successEl.style.display  = 'none';
+        errorEl.style.display    = 'none';
+        if (message) document.getElementById(`${prefix}ProgressLabel`).textContent = message;
     } else if (state === 'success') {
         progressEl.style.display = 'none';
-        successEl.textContent = message;
-        successEl.style.display = 'block';
-        errorEl.style.display = 'none';
+        successEl.textContent    = message;
+        successEl.style.display  = 'block';
+        errorEl.style.display    = 'none';
     } else if (state === 'error') {
         progressEl.style.display = 'none';
-        errorEl.textContent = message;
-        errorEl.style.display = 'block';
-        successEl.style.display = 'none';
+        errorEl.textContent      = message;
+        errorEl.style.display    = 'block';
+        successEl.style.display  = 'none';
     }
 }
 
