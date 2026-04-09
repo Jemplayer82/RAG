@@ -424,7 +424,8 @@ async def add_source(
     db.commit()
     db.refresh(job_record)
 
-    # Enqueue background job in Redis RQ
+    # Enqueue background job in Redis RQ (falls back to inline on Windows/no Redis)
+    use_inline = False
     try:
         q = get_ingestion_queue()
         rq_job = q.enqueue(
@@ -445,22 +446,31 @@ async def add_source(
         logger.info(f"[SOURCES] Queued job {rq_job.id} for user {user.id}: {title}")
     except Exception as e:
         logger.warning(f"[SOURCES] Redis unavailable, running inline: {e}")
-        # Fallback: run synchronously if Redis not available
-        try:
-            count = await asyncio.to_thread(
-                run_ingestion_job,
-                file_path=file_path, title=title, doc_type=doc_type,
-                user_id=user.id, url=source_url, doc_id_prefix=doc_id_prefix
-            )
-            doc.chunks = count
-            job_record.status = "complete"
-            job_record.completed_at = datetime.utcnow()
+        use_inline = True
+
+    if use_inline:
+        # Run in background task so polling still works
+        async def run_inline():
+            job_record.status = "running"
             db.commit()
-        except Exception as ingest_err:
-            job_record.status = "error"
-            job_record.error_msg = str(ingest_err)
-            db.commit()
-            raise HTTPException(status_code=500, detail=f"Ingestion failed: {ingest_err}")
+            try:
+                count = await asyncio.to_thread(
+                    run_ingestion_job,
+                    file_path=file_path, title=title, doc_type=doc_type,
+                    user_id=user.id, url=source_url, doc_id_prefix=doc_id_prefix
+                )
+                doc.chunks = count
+                job_record.status = "complete"
+                job_record.completed_at = datetime.utcnow()
+                db.commit()
+                logger.info(f"[SOURCES] Inline ingestion complete: {title} → {count} chunks")
+            except Exception as ingest_err:
+                job_record.status = "error"
+                job_record.error_msg = str(ingest_err)
+                db.commit()
+                logger.error(f"[SOURCES] Inline ingestion failed: {ingest_err}")
+
+        asyncio.create_task(run_inline())
 
     return {
         "status": "queued",
