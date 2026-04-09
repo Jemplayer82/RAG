@@ -26,11 +26,34 @@ logger = logging.getLogger(__name__)
 _embedder: Optional[SentenceTransformer] = None
 
 
+def _get_embed_device() -> str:
+    """Read device from DB config, fall back to env var."""
+    try:
+        from models import LLMProviderConfig, get_session_local
+        SessionLocal = get_session_local()
+        db = SessionLocal()
+        try:
+            config = db.query(LLMProviderConfig).first()
+            if config and config.embed_device:
+                return config.embed_device
+        finally:
+            db.close()
+    except Exception:
+        pass
+    return EMBED_DEVICE
+
+
 def _get_embedder() -> SentenceTransformer:
     global _embedder
+    device = _get_embed_device()
+    # Reload if device changed
+    if _embedder is not None and getattr(_embedder, '_current_device', None) != device:
+        logger.info(f"[EMBEDDER] Device changed to {device}, reloading...")
+        _embedder = None
     if _embedder is None:
-        logger.info(f"Loading embedder: {EMBED_MODEL}")
-        _embedder = SentenceTransformer(EMBED_MODEL, device=EMBED_DEVICE)
+        logger.info(f"[EMBEDDER] Loading {EMBED_MODEL} on {device}")
+        _embedder = SentenceTransformer(EMBED_MODEL, device=device)
+        _embedder._current_device = device
     return _embedder
 
 
