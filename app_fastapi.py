@@ -654,6 +654,41 @@ async def update_llm_settings(
     return {"status": "updated", "provider": data.provider, "model": data.model}
 
 
+@app.get("/api/admin/embed-device")
+async def get_embed_device(
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db)
+):
+    config = db.query(LLMProviderConfig).first()
+    return {"embed_device": config.embed_device if config else "cpu"}
+
+
+@app.post("/api/admin/embed-device")
+async def set_embed_device(
+    data: dict,
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db)
+):
+    device = data.get("embed_device", "cpu")
+    if device not in ("cpu", "cuda", "rocm"):
+        raise HTTPException(status_code=400, detail="Invalid device. Must be cpu, cuda, or rocm.")
+
+    config = db.query(LLMProviderConfig).first()
+    if not config:
+        config = LLMProviderConfig()
+        db.add(config)
+    config.embed_device = device
+    config.updated_by_id = user.id
+    db.commit()
+
+    # Update env var and reset embedder so it reloads on next request
+    os.environ["EMBED_DEVICE"] = device
+    import rag_async
+    rag_async._embedder = None
+    logger.info(f"[ADMIN] Embed device set to {device} by {user.username}")
+    return {"status": "updated", "embed_device": device}
+
+
 @app.post("/api/admin/llm-settings/test")
 async def test_llm_connection(
     user: User = Depends(require_admin),

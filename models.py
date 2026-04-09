@@ -97,6 +97,7 @@ class LLMProviderConfig(Base):
     temperature = Column(Float, default=0.3)
     top_p = Column(Float, default=0.9)
     max_tokens = Column(Integer, default=2048)
+    embed_device = Column(String(16), default="cpu")  # cpu | cuda | rocm
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     updated_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
 

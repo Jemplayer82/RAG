@@ -97,6 +97,42 @@
           </form>
         </div>
       </div>
+
+      <!-- Compute Device Card -->
+      <div class="card shadow-sm mt-4">
+        <div class="card-body p-4">
+          <h5 class="fw-semibold mb-1"><i class="bi bi-gpu-card me-2"></i>Embedding Compute Device</h5>
+          <p class="text-muted small mb-3">Controls which hardware runs the embedding model. Requires app restart to take effect.</p>
+
+          <div class="mb-3">
+            <label for="embedDevice" class="form-label fw-semibold">Device</label>
+            <select class="form-select" id="embedDevice">
+              <option value="cpu">CPU</option>
+              <option value="cuda">CUDA (NVIDIA GPU)</option>
+              <option value="rocm">ROCm (AMD GPU)</option>
+            </select>
+          </div>
+
+          <!-- PyTorch install command -->
+          <div id="torchInstallBox" class="d-none">
+            <label class="form-label fw-semibold">Required PyTorch Install Command</label>
+            <div class="input-group mb-1">
+              <input type="text" class="form-control font-monospace small" id="torchCmd" readonly>
+              <button class="btn btn-outline-secondary" type="button" id="copyTorchCmd">
+                <i class="bi bi-clipboard"></i>
+              </button>
+            </div>
+            <div class="form-text">Run this in your terminal after saving, then restart the app.</div>
+          </div>
+
+          <button class="btn btn-primary mt-3" id="saveDeviceBtn">
+            <i class="bi bi-save me-1"></i>Save Device
+          </button>
+          <div id="deviceAlert" class="alert d-none mt-3"></div>
+        </div>
+      </div>
+        </div>
+      </div>
     </div>
 
     <!-- Info sidebar -->
@@ -263,5 +299,63 @@ document.getElementById('testBtn').addEventListener('click', async () => {
 });
 
 loadSettings();
+
+// ---- Compute Device ----
+const TORCH_CMDS = {
+  cuda: 'pip install torch --index-url https://download.pytorch.org/whl/cu124',
+  rocm: 'pip install torch --index-url https://download.pytorch.org/whl/rocm6.1',
+  cpu:  'pip install torch',
+};
+
+const embedDeviceEl   = document.getElementById('embedDevice');
+const torchInstallBox = document.getElementById('torchInstallBox');
+const torchCmdEl      = document.getElementById('torchCmd');
+const deviceAlertEl   = document.getElementById('deviceAlert');
+
+function updateTorchCmd() {
+  const dev = embedDeviceEl.value;
+  if (dev === 'cpu') {
+    torchInstallBox.classList.add('d-none');
+  } else {
+    torchInstallBox.classList.remove('d-none');
+    torchCmdEl.value = TORCH_CMDS[dev];
+  }
+}
+
+embedDeviceEl.addEventListener('change', updateTorchCmd);
+
+document.getElementById('copyTorchCmd').addEventListener('click', () => {
+  navigator.clipboard.writeText(torchCmdEl.value);
+  document.getElementById('copyTorchCmd').innerHTML = '<i class="bi bi-check"></i>';
+  setTimeout(() => document.getElementById('copyTorchCmd').innerHTML = '<i class="bi bi-clipboard"></i>', 1500);
+});
+
+async function loadDevice() {
+  const resp = await fetch('/api/admin/embed-device', {
+    headers: { 'Authorization': `Bearer ${token}` }
+  });
+  if (resp.ok) {
+    const data = await resp.json();
+    embedDeviceEl.value = data.embed_device || 'cpu';
+    updateTorchCmd();
+  }
+}
+
+document.getElementById('saveDeviceBtn').addEventListener('click', async () => {
+  const resp = await fetch('/api/admin/embed-device', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ embed_device: embedDeviceEl.value }),
+  });
+  const data = await resp.json().catch(() => ({}));
+  deviceAlertEl.className = resp.ok ? 'alert alert-success mt-3' : 'alert alert-danger mt-3';
+  deviceAlertEl.textContent = resp.ok
+    ? `✓ Device set to ${embedDeviceEl.value}. Restart the app to apply.`
+    : (data.detail || 'Error saving device.');
+  deviceAlertEl.classList.remove('d-none');
+  setTimeout(() => deviceAlertEl.classList.add('d-none'), 6000);
+});
+
+loadDevice();
 </script>
 {% endblock %}
