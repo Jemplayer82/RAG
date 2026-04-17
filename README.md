@@ -49,10 +49,10 @@ ENCRYPTION_KEY=<fernet-key>
 Generate values with:
 ```bash
 # JWT_SECRET
-python -c "import secrets; print(secrets.token_hex(32))"
+python3 -c "import secrets; print(secrets.token_hex(32))"
 
-# ENCRYPTION_KEY
-python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+# ENCRYPTION_KEY (Fernet-compatible — 32 random bytes, base64url-encoded)
+python3 -c "import base64, os; print(base64.urlsafe_b64encode(os.urandom(32)).decode())"
 ```
 
 ```bash
