@@ -4,7 +4,7 @@ WORKDIR /app
 
 RUN apt-get update && apt-get install -y \
     gcc libpq-dev curl \
-    # Playwright/Scrapling browser dependencies
+    # Scrapling browser dependencies
     chromium chromium-driver \
     libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 \
     libxcomposite1 libxdamage1 libxrandr2 libgbm1 \
@@ -17,9 +17,12 @@ RUN pip install --no-cache-dir -r requirements.txt && \
 
 COPY . .
 
-RUN mkdir -p data/raw/uploads data/chroma
+RUN mkdir -p data/raw/uploads
 
 EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+  CMD curl -f http://localhost:8000/api/health || exit 1
 
 CMD ["gunicorn", "app_fastapi:app", \
      "--workers", "4", \

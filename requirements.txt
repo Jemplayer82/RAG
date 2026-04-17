@@ -1,14 +1,11 @@
 # Web Framework
-flask==3.0.0
-werkzeug==3.0.1
 fastapi==0.115.0
 uvicorn==0.30.0
 gunicorn==22.0.0
 
 # Vector Database & Embeddings
-chromadb==0.4.24
-sentence-transformers==3.0.1
 qdrant-client==1.9.0
+sentence-transformers==3.0.1
 
 # Retrieval & Ranking
 rank-bm25==0.2.2
