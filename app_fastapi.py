@@ -281,15 +281,17 @@ async def register(user_data: UserCreate, db: Session = Depends(get_db)):
     if existing:
         raise HTTPException(status_code=400, detail="Username or email already registered")
 
+    is_first_user = db.query(User).count() == 0
     user = User(
         username=user_data.username,
         email=user_data.email,
-        hashed_password=hash_password(user_data.password)
+        hashed_password=hash_password(user_data.password),
+        is_admin=is_first_user,
     )
     db.add(user)
     db.commit()
     db.refresh(user)
-    logger.info(f"[AUTH] Registered: {user.username}")
+    logger.info(f"[AUTH] Registered: {user.username}{' (admin)' if is_first_user else ''}")
     return user
 
 
