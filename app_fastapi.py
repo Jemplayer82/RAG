@@ -498,8 +498,8 @@ async def get_job_status(
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    # Sync status from Redis RQ if we have a job ID
-    if job.rq_job_id and job.status == "queued":
+    # Sync status from Redis RQ if we have a job ID and it's not yet terminal
+    if job.rq_job_id and job.status in ("queued", "running"):
         try:
             from rq.job import Job as RQJob
             rq_job = RQJob.fetch(job.rq_job_id, connection=get_redis())
