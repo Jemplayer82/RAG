@@ -6,9 +6,7 @@ services:
       POSTGRES_USER: rag
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
-      - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
+      - /storage/rag/postgres:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U rag"]
       interval: 10s
@@ -19,22 +17,13 @@ services:
   qdrant:
     image: qdrant/qdrant:latest
     volumes:
-      - qdrant_data:/qdrant/storage
-    ports:
-      - "6333:6333"
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:6333/healthz"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      - /storage/rag/qdrant:/qdrant/storage
     restart: unless-stopped
 
   redis:
     image: redis:7-alpine
     volumes:
-      - redis_data:/data
-    ports:
-      - "6379:6379"
+      - /storage/rag/redis:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -45,19 +34,21 @@ services:
   rag:
     build: .
     ports:
-      - "8000:8000"
+      - "8001:8000"
     env_file: .env
     environment:
       - DATABASE_URL=postgresql://rag:${POSTGRES_PASSWORD}@postgres:5432/rag_db
       - QDRANT_HOST=qdrant
       - REDIS_URL=redis://redis:6379/0
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
-      - uploads_data:/app/data
+      - /storage/rag/uploads:/app/data
     depends_on:
       postgres:
         condition: service_healthy
       qdrant:
-        condition: service_healthy
+        condition: service_started
       redis:
         condition: service_healthy
     restart: unless-stopped
@@ -70,35 +61,15 @@ services:
       - DATABASE_URL=postgresql://rag:${POSTGRES_PASSWORD}@postgres:5432/rag_db
       - QDRANT_HOST=qdrant
       - REDIS_URL=redis://redis:6379/0
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
-      - uploads_data:/app/data
+      - /storage/rag/uploads:/app/data
     depends_on:
       postgres:
         condition: service_healthy
       qdrant:
-        condition: service_healthy
+        condition: service_started
       redis:
         condition: service_healthy
     restart: unless-stopped
-
-  nginx:
-    image: nginx:alpine
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf:ro
-      - certbot_data:/etc/letsencrypt
-      - certbot_www:/var/www/certbot
-    depends_on:
-      rag:
-        condition: service_healthy
-    restart: unless-stopped
-
-volumes:
-  postgres_data:
-  qdrant_data:
-  redis_data:
-  uploads_data:
-  certbot_data:
-  certbot_www:

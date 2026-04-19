@@ -22,7 +22,6 @@ import requests
 from bs4 import BeautifulSoup
 import pdfplumber
 
-import chromadb
 from sentence_transformers import SentenceTransformer
 
 from config import (
@@ -369,6 +368,7 @@ def build_index(force_refresh: bool = False):
     start_time = time.time()
     total_chunks = 0
 
+    import chromadb
     client = chromadb.PersistentClient(path=str(CHROMA_DIR))
     collection = client.get_or_create_collection(name=CHROMA_COLLECTION)
 
