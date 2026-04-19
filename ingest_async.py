@@ -22,7 +22,7 @@ from config import (
     QDRANT_HOST, QDRANT_PORT,
     CHUNK_SIZE, CHUNK_OVERLAP
 )
-from ingest import chunk_text, ingest_pdf, ingest_txt, ingest_url
+from ingest import chunk_text, ingest_pdf, ingest_txt, ingest_url, ingest_docx, ingest_doc
 
 logger = logging.getLogger(__name__)
 
@@ -178,6 +178,10 @@ def run_ingestion_job(
         chunks, _ = ingest_pdf(file_path, title, url)
     elif doc_type == "txt":
         chunks, _ = ingest_txt(file_path, title, url)
+    elif doc_type == "docx":
+        chunks, _ = ingest_docx(file_path, title, url)
+    elif doc_type == "doc":
+        chunks, _ = ingest_doc(file_path, title, url)
     elif doc_type == "url":
         chunks, _ = ingest_url(url, title)
     else:

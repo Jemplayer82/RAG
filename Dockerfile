@@ -4,6 +4,8 @@ WORKDIR /app
 
 RUN apt-get update && apt-get install -y \
     gcc libpq-dev curl \
+    # Legacy .doc extraction
+    antiword \
     # Scrapling browser dependencies
     chromium chromium-driver \
     libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 \

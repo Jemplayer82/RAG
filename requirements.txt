@@ -24,8 +24,9 @@ anthropic>=0.25.0
 # Encryption (for API key storage)
 cryptography>=42.0.0
 
-# Document Processing (PDF)
+# Document Processing
 pdfplumber==0.10.3
+python-docx>=1.1.0
 
 # Configuration
 python-dotenv==1.0.1

@@ -32,18 +32,19 @@
         <div class="tab-pane fade show active" id="file-pane" role="tabpanel">
             <div class="card" style="max-width: 640px;">
                 <div class="card-header bg-primary text-white">
-                    <h5 class="mb-0">Upload PDF or Text File</h5>
+                    <h5 class="mb-0">Upload Documents</h5>
                 </div>
                 <div class="card-body">
                     <form id="fileUploadForm">
                         <div class="mb-3">
-                            <label for="fileInput" class="form-label">File <span class="text-danger">*</span></label>
-                            <input type="file" class="form-control" id="fileInput" accept=".pdf,.txt" required>
-                            <div class="form-text">Supported formats: PDF, TXT.</div>
+                            <label for="fileInput" class="form-label">Files <span class="text-danger">*</span></label>
+                            <input type="file" class="form-control" id="fileInput" accept=".pdf,.txt,.doc,.docx" multiple required>
+                            <div class="form-text">Supported: PDF, TXT, DOC, DOCX. Select multiple files to batch-upload (each filename becomes its title).</div>
                         </div>
-                        <div class="mb-3">
+                        <div class="mb-3" id="singleTitleWrapper">
                             <label for="fileTitleInput" class="form-label">Document Title <span class="text-danger">*</span></label>
-                            <input type="text" class="form-control" id="fileTitleInput" placeholder="e.g., Company Policy v2.3" required>
+                            <input type="text" class="form-control" id="fileTitleInput" placeholder="e.g., Company Policy v2.3">
+                            <div class="form-text">Only used when a single file is selected.</div>
                         </div>
                         <button type="submit" class="btn btn-success" id="fileSubmitBtn">
                             <i class="bi bi-cloud-upload"></i> Upload & Ingest
@@ -134,52 +135,86 @@
     if (!user.is_admin) { window.location.href = '/'; }
 })();
 
-// ---- File Upload ----
+// ---- File Upload (supports multiple files) ----
+const ALLOWED_TYPES = { pdf: 'pdf', txt: 'txt', doc: 'doc', docx: 'docx' };
+
 document.getElementById('fileUploadForm').addEventListener('submit', async (e) => {
     e.preventDefault();
 
     const fileInput = document.getElementById('fileInput');
-    const title = document.getElementById('fileTitleInput').value.trim();
-    const file = fileInput.files[0];
+    const titleInput = document.getElementById('fileTitleInput');
+    const files = Array.from(fileInput.files);
 
-    if (!file || !title) return;
+    if (files.length === 0) return;
 
-    const ext = file.name.split('.').pop().toLowerCase();
-    const type = ext === 'pdf' ? 'pdf' : 'txt';
+    const submitBtn = document.getElementById('fileSubmitBtn');
+    submitBtn.disabled = true;
 
-    showStatus('file', 'progress', 'Uploading file...');
-    setProgress('file', 5, 'Uploading file...');
+    const results = { ok: 0, fail: 0, errors: [] };
 
     try {
-        const formData = new FormData();
-        formData.append('type', type);
-        formData.append('title', title);
-        formData.append('file', file);
+        for (let i = 0; i < files.length; i++) {
+            const file = files[i];
+            const ext = file.name.split('.').pop().toLowerCase();
+            const type = ALLOWED_TYPES[ext];
 
-        const response = await fetch('/api/sources', {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${localStorage.getItem('rag_token')}` },
-            body: formData
-        });
+            if (!type) {
+                results.fail += 1;
+                results.errors.push(`${file.name}: unsupported extension .${ext}`);
+                continue;
+            }
 
-        if (response.status === 401) {
-            window.location.href = '/login';
-            return;
-        }
+            // Title: use the field only when exactly one file is selected; otherwise derive from filename.
+            const title = (files.length === 1 && titleInput.value.trim())
+                ? titleInput.value.trim()
+                : file.name.replace(/\.[^.]+$/, '');
 
-        const data = await response.json();
+            const label = files.length > 1 ? `(${i + 1}/${files.length}) ${title}` : title;
+            showStatus('file', 'progress', `Uploading ${label}...`);
+            setProgress('file', 5, `Uploading ${label}...`);
 
-        if (!response.ok) throw new Error(data.detail || 'Upload failed');
+            try {
+                const formData = new FormData();
+                formData.append('type', type);
+                formData.append('title', title);
+                formData.append('file', file);
 
-        if (data.job_id) {
-            await pollJobStatus('file', data.job_id);
+                const response = await fetch('/api/sources', {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${localStorage.getItem('rag_token')}` },
+                    body: formData
+                });
+
+                if (response.status === 401) {
+                    window.location.href = '/login';
+                    return;
+                }
+
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.detail || 'Upload failed');
+
+                if (data.job_id) {
+                    await pollJobStatus('file', data.job_id, label);
+                }
+                results.ok += 1;
+
+            } catch (err) {
+                results.fail += 1;
+                results.errors.push(`${file.name}: ${err.message}`);
+            }
         }
 
         document.getElementById('fileUploadForm').reset();
         loadSources();
 
-    } catch (err) {
-        showStatus('file', 'error', err.message);
+        if (results.fail === 0) {
+            showStatus('file', 'success', `✓ ${results.ok} document${results.ok === 1 ? '' : 's'} added successfully.`);
+        } else {
+            showStatus('file', 'error', `${results.ok} succeeded, ${results.fail} failed:\n` + results.errors.join('\n'));
+        }
+
+    } finally {
+        submitBtn.disabled = false;
     }
 });
 
@@ -227,16 +262,17 @@ document.getElementById('urlForm').addEventListener('submit', async (e) => {
 });
 
 // ---- Job Polling ----
-async function pollJobStatus(prefix, jobId) {
-    showStatus(prefix, 'progress', 'Queued...');
-    setProgress(prefix, 10, 'Queued...');
+async function pollJobStatus(prefix, jobId, label) {
+    const prefixLabel = label ? `${label} — ` : '';
+    showStatus(prefix, 'progress', `${prefixLabel}Queued...`);
+    setProgress(prefix, 10, `${prefixLabel}Queued...`);
 
     // Slowly animate bar to 80% while waiting
     let fakePct = 10;
     const ticker = setInterval(() => {
         if (fakePct < 75) {
             fakePct += Math.random() * 4;
-            setProgress(prefix, Math.round(fakePct), 'Processing...');
+            setProgress(prefix, Math.round(fakePct), `${prefixLabel}Processing...`);
         }
     }, 800);
 
@@ -256,7 +292,7 @@ async function pollJobStatus(prefix, jobId) {
                 const job = await r.json();
 
                 if (job.status === 'running') {
-                    setProgress(prefix, Math.max(fakePct, 50), 'Embedding chunks...');
+                    setProgress(prefix, Math.max(fakePct, 50), `${prefixLabel}Embedding chunks...`);
                 } else if (job.status === 'complete') {
                     clearInterval(poll); clearInterval(ticker);
                     setProgress(prefix, 100, 'Complete!');
