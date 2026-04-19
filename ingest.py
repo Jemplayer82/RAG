@@ -192,6 +192,54 @@ def ingest_txt(file_path: str, title: str, url_hint: str = "") -> Tuple[List[Dic
 
 
 # ============================================================================
+# INGESTION: Word (.docx)
+# ============================================================================
+
+def ingest_docx(file_path: str, title: str, url_hint: str = "") -> Tuple[List[Dict], int]:
+    """Extract text from a .docx Word document and chunk it."""
+    from docx import Document as DocxDocument
+
+    doc = DocxDocument(file_path)
+    parts = [p.text for p in doc.paragraphs if p.text.strip()]
+    for table in doc.tables:
+        for row in table.rows:
+            row_text = "\t".join(cell.text.strip() for cell in row.cells if cell.text.strip())
+            if row_text:
+                parts.append(row_text)
+    text = "\n".join(parts)
+    chunks = chunk_text(text, title, "docx", url_hint)
+    logger.info(f"[DOCX] {title}: {len(parts)} blocks → {len(chunks)} chunks")
+    return chunks, len(parts)
+
+
+# ============================================================================
+# INGESTION: Word legacy (.doc)
+# ============================================================================
+
+def ingest_doc(file_path: str, title: str, url_hint: str = "") -> Tuple[List[Dict], int]:
+    """
+    Extract text from a legacy .doc Word document via antiword.
+    Requires the `antiword` binary to be installed in the environment.
+    """
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["antiword", file_path],
+            capture_output=True, text=True, timeout=60, check=True
+        )
+        text = result.stdout
+    except FileNotFoundError as e:
+        raise RuntimeError("antiword is not installed — cannot process legacy .doc files") from e
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError(f"antiword failed: {e.stderr.strip() or e}") from e
+
+    line_count = len(text.splitlines())
+    chunks = chunk_text(text, title, "doc", url_hint)
+    logger.info(f"[DOC] {title}: {line_count} lines → {len(chunks)} chunks")
+    return chunks, line_count
+
+
+# ============================================================================
 # INGESTION: Web URL
 # ============================================================================
 

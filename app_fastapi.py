@@ -388,7 +388,7 @@ async def add_source(
     source_url = url or ""
 
     # Save uploaded file to disk
-    if doc_type in ("pdf", "txt") and file:
+    if doc_type in ("pdf", "txt", "doc", "docx") and file:
         safe_name = secure_filename(file.filename)
         dest = Path(CACHE_ROOT) / "uploads" / f"{user.id}_{safe_name}"
         dest.parent.mkdir(parents=True, exist_ok=True)
