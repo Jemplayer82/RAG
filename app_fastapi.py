@@ -451,26 +451,38 @@ async def add_source(
         use_inline = True
 
     if use_inline:
-        # Run in background task so polling still works
+        # The request-scoped `db` session is closed by get_db() once this
+        # handler returns, so the background task must open its own session
+        # and re-query the records by primary key.
+        job_id = job_record.id
+        doc_id = doc.id
+        user_id = user.id
+
         async def run_inline():
-            job_record.status = "running"
-            db.commit()
+            bg_db = SessionLocal()
             try:
-                count = await asyncio.to_thread(
-                    run_ingestion_job,
-                    file_path=file_path, title=title, doc_type=doc_type,
-                    user_id=user.id, url=source_url, doc_id_prefix=doc_id_prefix
-                )
-                doc.chunks = count
-                job_record.status = "complete"
-                job_record.completed_at = datetime.utcnow()
-                db.commit()
-                logger.info(f"[SOURCES] Inline ingestion complete: {title} → {count} chunks")
-            except Exception as ingest_err:
-                job_record.status = "error"
-                job_record.error_msg = str(ingest_err)
-                db.commit()
-                logger.error(f"[SOURCES] Inline ingestion failed: {ingest_err}")
+                job_row = bg_db.query(IngestionJob).get(job_id)
+                doc_row = bg_db.query(Document).get(doc_id)
+                job_row.status = "running"
+                bg_db.commit()
+                try:
+                    count = await asyncio.to_thread(
+                        run_ingestion_job,
+                        file_path=file_path, title=title, doc_type=doc_type,
+                        user_id=user_id, url=source_url, doc_id_prefix=doc_id_prefix
+                    )
+                    doc_row.chunks = count
+                    job_row.status = "complete"
+                    job_row.completed_at = datetime.utcnow()
+                    bg_db.commit()
+                    logger.info(f"[SOURCES] Inline ingestion complete: {title} → {count} chunks")
+                except Exception as ingest_err:
+                    job_row.status = "error"
+                    job_row.error_msg = str(ingest_err)
+                    bg_db.commit()
+                    logger.error(f"[SOURCES] Inline ingestion failed: {ingest_err}")
+            finally:
+                bg_db.close()
 
         asyncio.create_task(run_inline())
 
