@@ -693,22 +693,39 @@ async def set_embed_device(
 
 @app.post("/api/admin/llm-settings/test")
 async def test_llm_connection(
+    pending: Optional[LLMSettingsUpdate] = None,
     user: User = Depends(require_admin),
     db: Session = Depends(get_db)
 ):
     from llm_provider import query_llm_async
-    config_row = db.query(LLMProviderConfig).first()
-    config = None
-    if config_row:
+
+    if pending is not None:
         config = {
-            "provider": config_row.provider,
-            "model": config_row.model,
-            "api_key": config_row.api_key or "",
-            "base_url": config_row.base_url or "",
-            "temperature": config_row.temperature,
-            "top_p": config_row.top_p,
+            "provider": pending.provider,
+            "model": pending.model,
+            "api_key": pending.api_key or "",
+            "base_url": pending.base_url or "",
+            "temperature": pending.temperature,
+            "top_p": pending.top_p,
             "max_tokens": 64,
         }
+        if not pending.api_key:
+            saved = db.query(LLMProviderConfig).first()
+            if saved and saved.api_key:
+                config["api_key"] = saved.api_key
+    else:
+        config_row = db.query(LLMProviderConfig).first()
+        config = None
+        if config_row:
+            config = {
+                "provider": config_row.provider,
+                "model": config_row.model,
+                "api_key": config_row.api_key or "",
+                "base_url": config_row.base_url or "",
+                "temperature": config_row.temperature,
+                "top_p": config_row.top_p,
+                "max_tokens": 64,
+            }
     try:
         response = await query_llm_async("Reply with only: OK", config)
         return {"status": "ok", "response": response[:200]}
