@@ -82,21 +82,42 @@ async def _call_anthropic(prompt: str, config: Dict) -> str:
 
 
 async def _call_ollama(prompt: str, config: Dict) -> str:
-    base_url = config.get("base_url") or os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+    from models import decrypt_api_key
+
+    base_url = (config.get("base_url") or os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")).rstrip("/")
+    model = config.get("model") or os.getenv("LLM_MODEL", "mistral-small3.1")
+    raw_key = config.get("api_key", "")
+    api_key = decrypt_api_key(raw_key) if raw_key else ""
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
     async with httpx.AsyncClient(timeout=120) as client:
-        response = await client.post(
-            f"{base_url}/api/generate",
-            json={
-                "model": config.get("model", "mistral-small3.1"),
-                "prompt": prompt,
-                "stream": False,
-                "options": {
-                    "temperature": config.get("temperature", 0.3),
-                    "top_p": config.get("top_p", 0.9),
+        try:
+            response = await client.post(
+                f"{base_url}/api/generate",
+                headers=headers,
+                json={
+                    "model": model,
+                    "prompt": prompt,
+                    "stream": False,
+                    "options": {
+                        "temperature": config.get("temperature", 0.3),
+                        "top_p": config.get("top_p", 0.9),
+                    },
                 },
-            },
-        )
-        response.raise_for_status()
+            )
+        except httpx.ConnectError as e:
+            raise RuntimeError(f"Cannot reach Ollama at {base_url}: {e}") from e
+        if response.status_code >= 400:
+            err_body = ""
+            try:
+                err_body = response.json().get("error", "") or response.text
+            except Exception:
+                err_body = response.text
+            if "not found" in err_body.lower() or "no such" in err_body.lower() or response.status_code == 404:
+                raise RuntimeError(
+                    f"Ollama model '{model}' not found at {base_url}. "
+                    f"Pull it with: docker exec rag-ollama-1 ollama pull {model}"
+                )
+            raise RuntimeError(f"Ollama error ({response.status_code}) at {base_url}: {err_body}")
         return response.json().get("response", "")
 
 

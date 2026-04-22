@@ -201,7 +201,7 @@ const MODEL_HINTS = {
 function updateFieldVisibility() {
   const p = providerEl.value;
   baseUrlGroup.classList.toggle('d-none', p === 'openai' || p === 'anthropic');
-  apiKeyGroup.classList.toggle('d-none', p === 'ollama');
+  apiKeyGroup.classList.toggle('d-none', false);
   modelHint.textContent = MODEL_HINTS[p] || '';
 }
 
@@ -286,9 +286,26 @@ document.getElementById('settingsForm').addEventListener('submit', async (e) => 
 });
 
 document.getElementById('testBtn').addEventListener('click', async () => {
+  const fd = new FormData(document.getElementById('settingsForm'));
+  const body = {
+    provider:    fd.get('provider'),
+    model:       fd.get('model'),
+    base_url:    fd.get('base_url') || null,
+    temperature: parseFloat(fd.get('temperature')) || 0.3,
+    top_p:       parseFloat(fd.get('top_p')) || 0.9,
+    max_tokens:  parseInt(fd.get('max_tokens')) || 2048,
+  };
+  const apiKey = fd.get('api_key');
+  if (apiKey) body.api_key = apiKey;
+
+  showAlert('Testing connection…', 'info');
   const resp = await fetch('/api/admin/llm-settings/test', {
     method: 'POST',
-    headers: { 'Authorization': `Bearer ${token}` }
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
   });
   const data = await resp.json().catch(() => ({}));
   if (resp.ok) {
