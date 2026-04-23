@@ -38,7 +38,7 @@ docker compose logs -f rag-worker
 
 The `rag` service is the only container with a published port. All other services are reachable only via the Docker network (by hostname: `postgres`, `qdrant`, `redis`, `ollama`).
 
-Data volumes are mounted from `/storage/rag/` on the host (not named Docker volumes).
+Data lives at `/storage/rag/{postgres,qdrant,redis,uploads,ollama}` via named volumes that use the `local` driver's `type: none, o: bind, device: <host-path>` pattern. Portainer lists them in its Volumes UI as part of the stack, but the actual files are at a known host path (not under `/var/lib/docker/volumes`). Host directories must exist before the first `docker compose up`; `docker compose down -v` removes the Docker-level volume references but will not delete host files (Docker doesn't own the path).
 
 ### Request Flow
 
