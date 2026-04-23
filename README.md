@@ -28,6 +28,14 @@ A self-hosted web app that lets multiple users upload documents (PDF, TXT, or UR
 
 Ollama runs inside the stack as a container — no host install needed. After the stack is up, pick and pull a model from the admin settings UI at `/admin/llm-settings`.
 
+## Prerequisites (one-time, on every host)
+
+```bash
+sudo mkdir -p /storage/rag/{postgres,qdrant,redis,uploads,ollama}
+```
+
+The stack uses named Docker volumes that bind to `/storage/rag/*` on the host, so these directories must exist before the first deploy. Portainer lists them in its Volumes UI per-stack; the data lives at predictable host paths for backup/restore.
+
 ## Quick Start (Docker Compose)
 
 ```bash
@@ -46,6 +54,8 @@ A cloned repo auto-loads `docker-compose.override.yml`, which builds the image l
 Browse to **http://localhost:8000** and register an account.
 
 ## Quick Start (Portainer)
+
+Make sure `/storage/rag/{postgres,qdrant,redis,uploads,ollama}` exists on the host before deploying (see Prerequisites above) — named volumes with bind-mount `driver_opts` don't auto-create the host path.
 
 1. In Portainer → **Stacks** → **Add stack** → name it `rag`.
 2. Paste the contents of [`docker-compose.yml`](docker-compose.yml) into the web editor. (Do **not** include `docker-compose.override.yml` — that file triggers a local build and will fail in Portainer's paste-compose mode, which has no Dockerfile.)
