@@ -39,6 +39,8 @@ docker compose up -d
 curl http://localhost:8000/api/health
 ```
 
+A cloned repo auto-loads `docker-compose.override.yml`, which builds the image locally from the `Dockerfile`. To skip the build and use the published image instead, run `docker compose -f docker-compose.yml up -d`.
+
 `JWT_SECRET` and `ENCRYPTION_KEY` auto-generate on first boot and persist to `/storage/rag/uploads/.secrets.env`, so they survive image pulls and stack restarts. Override them in `.env` only if you need to pin specific values.
 
 Browse to **http://localhost:8000** and register an account.
@@ -46,12 +48,12 @@ Browse to **http://localhost:8000** and register an account.
 ## Quick Start (Portainer)
 
 1. In Portainer → **Stacks** → **Add stack** → name it `rag`.
-2. Point it at this repository (or paste `docker-compose.yml` into the web editor).
+2. Paste the contents of [`docker-compose.yml`](docker-compose.yml) into the web editor. (Do **not** include `docker-compose.override.yml` — that file triggers a local build and will fail in Portainer's paste-compose mode, which has no Dockerfile.)
 3. Under **Environment variables**, add:
-   - `POSTGRES_PASSWORD` — required, any strong string
+   - `POSTGRES_PASSWORD` — required, any 32-char alphanumeric string
    - (optional) `RAG_PORT` if you need something other than `8000`
    - (optional) `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` if you plan to use a cloud LLM
-4. **Deploy the stack**.
+4. **Deploy the stack**. Portainer will pull `ghcr.io/jemplayer82/rag:latest` (no build step).
 5. Browse to `http://<host>:8000` and register.
 
 The app writes `JWT_SECRET` and `ENCRYPTION_KEY` into the data volume on first boot. Pulling a newer image via Portainer keeps them — they live on the host at `/storage/rag/uploads/.secrets.env`, not inside the container. Back that file up to survive a volume wipe.

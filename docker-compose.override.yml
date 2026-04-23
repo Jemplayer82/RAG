@@ -1,0 +1,17 @@
+# Auto-loaded by `docker compose` when you run from a clone of this repo.
+# Tells Compose to build the rag/rag-worker images from the local Dockerfile
+# instead of pulling ghcr.io/jemplayer82/rag:latest.
+#
+# Portainer "paste compose" deploys never see this file — they only get the
+# contents of docker-compose.yml and pull the prebuilt image.
+#
+# Local use:
+#   docker compose up -d --build      # force a rebuild
+#   docker compose up -d              # builds on first run, reuses after
+
+services:
+  rag:
+    build: .
+
+  rag-worker:
+    build: .
