@@ -3,6 +3,7 @@ SQLAlchemy ORM models for RAG v2.0 multi-user system.
 Tables: User, Document, IngestionJob, LLMProviderConfig
 """
 
+import logging
 import os
 from datetime import datetime
 from sqlalchemy import (
@@ -14,17 +15,56 @@ from sqlalchemy.orm import sessionmaker, relationship
 
 from config import DATABASE_URL
 
+logger = logging.getLogger(__name__)
+
 # ============================================================================
 # API KEY ENCRYPTION
 # ============================================================================
 
+_PLACEHOLDER_ENCRYPTION_KEYS = {
+    "",
+    "changeme",
+    "changeme_generate_fernet_key",
+}
+_GENERATE_KEY_CMD = (
+    'python -c "from cryptography.fernet import Fernet; '
+    'print(Fernet.generate_key().decode())"'
+)
+_cipher = None
+
+
 def _get_cipher():
+    """
+    Return a cached Fernet cipher.
+
+    - If ENCRYPTION_KEY is unset or still a placeholder, generate a random key
+      for this process and log a warning. Stored API keys won't survive restart.
+    - If ENCRYPTION_KEY is set to something that isn't a valid Fernet key,
+      raise with a clear message rather than the cryptic ValueError from Fernet.
+    """
+    global _cipher
+    if _cipher is not None:
+        return _cipher
+
     from cryptography.fernet import Fernet
-    key = os.getenv("ENCRYPTION_KEY", "")
-    if not key:
-        # Generate a default key for development (won't persist across restarts)
+
+    key = os.getenv("ENCRYPTION_KEY", "").strip()
+    if key in _PLACEHOLDER_ENCRYPTION_KEYS:
         key = Fernet.generate_key().decode()
-    return Fernet(key.encode() if isinstance(key, str) else key)
+        logger.warning(
+            "ENCRYPTION_KEY is not set — generated an ephemeral key for this process. "
+            "Stored API keys will be unreadable after restart. Generate a permanent "
+            "key with: %s",
+            _GENERATE_KEY_CMD,
+        )
+    try:
+        _cipher = Fernet(key.encode())
+    except ValueError as e:
+        raise RuntimeError(
+            f"ENCRYPTION_KEY is not a valid Fernet key ({e}). "
+            f"Generate one with: {_GENERATE_KEY_CMD}"
+        ) from e
+    return _cipher
 
 
 def encrypt_api_key(plain_key: str) -> str:
