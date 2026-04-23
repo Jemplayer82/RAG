@@ -36,13 +36,14 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
+import httpx
 import jwt
 import aiofiles
 from fastapi import (
     FastAPI, Depends, HTTPException, UploadFile, File,
     Form, Request, status
 )
-from fastapi.responses import JSONResponse, HTMLResponse
+from fastapi.responses import JSONResponse, HTMLResponse, StreamingResponse
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -689,6 +690,100 @@ async def set_embed_device(
     rag_async._embedder = None
     logger.info(f"[ADMIN] Embed device set to {device} by {user.username}")
     return {"status": "updated", "embed_device": device}
+
+
+# ============================================================================
+# ROUTES: Admin — Ollama model management
+# ============================================================================
+
+def _resolve_ollama_base_url(db: Session) -> str:
+    """Base URL for the Ollama container — DB config wins, env var falls back."""
+    config = db.query(LLMProviderConfig).first()
+    if config and config.base_url:
+        return config.base_url.rstrip("/")
+    return os.getenv("LLM_BASE_URL", os.getenv("OLLAMA_BASE_URL", "http://ollama:11434")).rstrip("/")
+
+
+@app.get("/api/admin/ollama/models")
+async def list_ollama_models(
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """List models currently installed inside the Ollama container."""
+    base_url = _resolve_ollama_base_url(db)
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(f"{base_url}/api/tags")
+            resp.raise_for_status()
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=502, detail=f"Cannot reach Ollama at {base_url}: {e}")
+    data = resp.json()
+    return {
+        "base_url": base_url,
+        "models": [
+            {
+                "name": m.get("name", ""),
+                "size": m.get("size", 0),
+                "modified_at": m.get("modified_at", ""),
+            }
+            for m in data.get("models", [])
+        ],
+    }
+
+
+@app.post("/api/admin/ollama/pull")
+async def pull_ollama_model(
+    data: dict,
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Pull an Ollama model. Streams NDJSON progress from Ollama straight through to the client."""
+    name = (data.get("name") or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Model name required")
+    base_url = _resolve_ollama_base_url(db)
+
+    async def stream_pull():
+        async with httpx.AsyncClient(timeout=None) as client:
+            try:
+                async with client.stream(
+                    "POST",
+                    f"{base_url}/api/pull",
+                    json={"name": name, "stream": True},
+                ) as resp:
+                    if resp.status_code >= 400:
+                        body = await resp.aread()
+                        yield f'{{"error": "Ollama {resp.status_code}: {body.decode(errors="ignore")[:200]}"}}\n'
+                        return
+                    async for line in resp.aiter_lines():
+                        if line:
+                            yield line + "\n"
+            except httpx.RequestError as e:
+                yield f'{{"error": "Cannot reach Ollama at {base_url}: {e}"}}\n'
+
+    return StreamingResponse(stream_pull(), media_type="application/x-ndjson")
+
+
+@app.delete("/api/admin/ollama/models/{model_name:path}")
+async def delete_ollama_model(
+    model_name: str,
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Remove a pulled Ollama model to free disk space."""
+    base_url = _resolve_ollama_base_url(db)
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.request(
+                "DELETE",
+                f"{base_url}/api/delete",
+                json={"name": model_name},
+            )
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=502, detail=f"Cannot reach Ollama at {base_url}: {e}")
+    if resp.status_code >= 400:
+        raise HTTPException(status_code=resp.status_code, detail=resp.text)
+    return {"status": "deleted", "name": model_name}
 
 
 @app.post("/api/admin/llm-settings/test")

@@ -50,8 +50,9 @@ CHROMA_DIR.mkdir(parents=True, exist_ok=True)
 # LLM & EMBEDDING MODELS
 # ============================================================================
 
-OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-LLM_MODEL = os.getenv("LLM_MODEL", "mistral-small3.1")
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://ollama:11434")
+# Empty by default — admin picks a model via /admin/llm-settings.
+LLM_MODEL = os.getenv("LLM_MODEL", "")
 
 EMBED_MODEL = os.getenv("EMBED_MODEL", "BAAI/bge-large-en-v1.5")
 EMBED_DEVICE = os.getenv("EMBED_DEVICE", "cpu")

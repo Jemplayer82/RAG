@@ -35,8 +35,12 @@
             <div class="mb-4">
               <label for="model" class="form-label fw-semibold">Model Name</label>
               <input type="text" class="form-control" id="model" name="model" required
-                     placeholder="e.g. gpt-4o, claude-3-5-sonnet-20241022, mistral-small3.1">
+                     placeholder="e.g. gpt-4o, claude-3-5-sonnet-20241022, llama3.1">
               <div id="modelHint" class="form-text"></div>
+              <div id="installedModels" class="d-none mt-2">
+                <div class="form-text mb-1">Installed Ollama models — click to use:</div>
+                <div id="installedModelsList" class="d-flex flex-wrap gap-1"></div>
+              </div>
             </div>
 
             <!-- Base URL (Ollama / Generic) -->
@@ -95,6 +99,43 @@
             </div>
 
           </form>
+        </div>
+      </div>
+
+      <!-- Ollama Model Management (visible only when provider=ollama) -->
+      <div class="card shadow-sm mt-4 d-none" id="ollamaCard">
+        <div class="card-body p-4">
+          <h5 class="fw-semibold mb-1"><i class="bi bi-cloud-download me-2"></i>Ollama Models</h5>
+          <p class="text-muted small mb-3">Manage models inside the local Ollama container.</p>
+
+          <div class="mb-3">
+            <label class="form-label fw-semibold small">Pull a new model</label>
+            <div class="input-group">
+              <input type="text" class="form-control" id="pullModelName"
+                     placeholder="e.g. llama3.1, gemma2:2b, qwen2.5:7b">
+              <button class="btn btn-primary" type="button" id="pullBtn">
+                <i class="bi bi-download me-1"></i>Pull
+              </button>
+            </div>
+            <div class="form-text">Browse available models at <a href="https://ollama.com/library" target="_blank">ollama.com/library</a>.</div>
+          </div>
+
+          <div id="pullProgress" class="d-none">
+            <div class="progress mb-2" style="height: 1.25rem;">
+              <div id="pullProgressBar" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%"></div>
+            </div>
+            <div id="pullStatus" class="form-text"></div>
+          </div>
+
+          <hr class="my-3">
+
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <label class="form-label fw-semibold small mb-0">Installed models</label>
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="refreshModelsBtn">
+              <i class="bi bi-arrow-clockwise"></i>
+            </button>
+          </div>
+          <div id="ollamaModelsTable"></div>
         </div>
       </div>
 
@@ -203,6 +244,11 @@ function updateFieldVisibility() {
   baseUrlGroup.classList.toggle('d-none', p === 'openai' || p === 'anthropic');
   apiKeyGroup.classList.toggle('d-none', false);
   modelHint.textContent = MODEL_HINTS[p] || '';
+
+  const isOllama = p === 'ollama';
+  document.getElementById('ollamaCard').classList.toggle('d-none', !isOllama);
+  document.getElementById('installedModels').classList.toggle('d-none', !isOllama);
+  if (isOllama) refreshOllamaModels();
 }
 
 providerEl.addEventListener('change', updateFieldVisibility);
@@ -316,6 +362,144 @@ document.getElementById('testBtn').addEventListener('click', async () => {
 });
 
 loadSettings();
+
+// ---- Ollama Model Management ----
+const installedModelsList = document.getElementById('installedModelsList');
+const ollamaModelsTable   = document.getElementById('ollamaModelsTable');
+
+function formatSize(bytes) {
+  if (!bytes) return '';
+  const gb = bytes / (1024 ** 3);
+  if (gb >= 1) return gb.toFixed(1) + ' GB';
+  const mb = bytes / (1024 ** 2);
+  return mb.toFixed(0) + ' MB';
+}
+
+async function refreshOllamaModels() {
+  try {
+    const resp = await fetch('/api/admin/ollama/models', {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      ollamaModelsTable.innerHTML = `<div class="alert alert-warning small mb-0">${err.detail || 'Cannot reach Ollama.'}</div>`;
+      installedModelsList.innerHTML = '';
+      return;
+    }
+    const data = await resp.json();
+    const models = data.models || [];
+    if (models.length === 0) {
+      ollamaModelsTable.innerHTML = '<div class="text-muted small">No models installed yet. Pull one above to get started.</div>';
+      installedModelsList.innerHTML = '<span class="text-muted small">None installed</span>';
+      return;
+    }
+    ollamaModelsTable.innerHTML = `
+      <table class="table table-sm mb-0">
+        <tbody>
+          ${models.map(m => `
+            <tr>
+              <td class="align-middle"><code>${m.name}</code></td>
+              <td class="align-middle text-muted small">${formatSize(m.size)}</td>
+              <td class="align-middle text-end">
+                <button class="btn btn-sm btn-outline-primary use-model-btn" data-name="${m.name}">Use</button>
+                <button class="btn btn-sm btn-outline-danger delete-model-btn" data-name="${m.name}" title="Delete">
+                  <i class="bi bi-trash"></i>
+                </button>
+              </td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    `;
+    installedModelsList.innerHTML = models.map(m =>
+      `<button type="button" class="btn btn-sm btn-outline-secondary use-model-btn" data-name="${m.name}">${m.name}</button>`
+    ).join('');
+
+    document.querySelectorAll('.use-model-btn').forEach(btn => {
+      btn.addEventListener('click', () => { modelEl.value = btn.dataset.name; });
+    });
+    document.querySelectorAll('.delete-model-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        if (!confirm(`Delete model "${btn.dataset.name}"?`)) return;
+        const r = await fetch(`/api/admin/ollama/models/${encodeURIComponent(btn.dataset.name)}`, {
+          method: 'DELETE',
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (r.ok) refreshOllamaModels();
+        else showAlert((await r.json().catch(() => ({}))).detail || 'Delete failed.', 'danger');
+      });
+    });
+  } catch (err) {
+    ollamaModelsTable.innerHTML = `<div class="alert alert-warning small mb-0">${err.message}</div>`;
+  }
+}
+
+document.getElementById('refreshModelsBtn').addEventListener('click', refreshOllamaModels);
+
+document.getElementById('pullBtn').addEventListener('click', async () => {
+  const name = document.getElementById('pullModelName').value.trim();
+  if (!name) return;
+
+  const progressWrap = document.getElementById('pullProgress');
+  const progressBar  = document.getElementById('pullProgressBar');
+  const statusEl     = document.getElementById('pullStatus');
+  progressWrap.classList.remove('d-none');
+  progressBar.style.width = '0%';
+  progressBar.classList.remove('bg-success', 'bg-danger');
+  statusEl.textContent = 'Starting…';
+
+  try {
+    const resp = await fetch('/api/admin/ollama/pull', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name })
+    });
+    if (!resp.ok || !resp.body) {
+      statusEl.textContent = 'Pull failed to start.';
+      progressBar.classList.add('bg-danger');
+      return;
+    }
+
+    const reader  = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        let evt;
+        try { evt = JSON.parse(line); } catch { continue; }
+        if (evt.error) {
+          statusEl.textContent = `Error: ${evt.error}`;
+          progressBar.classList.add('bg-danger');
+          return;
+        }
+        if (evt.total && evt.completed != null) {
+          const pct = Math.min(100, Math.round((evt.completed / evt.total) * 100));
+          progressBar.style.width = pct + '%';
+          progressBar.textContent = pct + '%';
+        }
+        if (evt.status) statusEl.textContent = evt.status;
+      }
+    }
+
+    progressBar.style.width = '100%';
+    progressBar.textContent = 'Done';
+    progressBar.classList.add('bg-success');
+    statusEl.textContent = `Pulled ${name}.`;
+    document.getElementById('pullModelName').value = '';
+    modelEl.value = name;
+    refreshOllamaModels();
+  } catch (err) {
+    statusEl.textContent = `Error: ${err.message}`;
+    progressBar.classList.add('bg-danger');
+  }
+});
 
 // ---- Compute Device ----
 const TORCH_CMDS = {

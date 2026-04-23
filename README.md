@@ -18,15 +18,15 @@ A self-hosted web app that lets multiple users upload documents (PDF, TXT, or UR
 | Auth DB | PostgreSQL + SQLAlchemy |
 | Job queue | Redis + RQ (background ingestion) |
 | Embeddings | `BAAI/bge-large-en-v1.5` via sentence-transformers |
-| LLM (default) | Ollama — `mistral-small3.1` |
+| LLM | Ollama (self-contained container) or OpenAI / Anthropic / generic |
 | Frontend | Jinja2 templates + Bootstrap 5.3 |
-| Reverse proxy | Nginx with rate limiting + optional TLS |
 
 ## Prerequisites
 
 - **Docker** and **Docker Compose** v2+
-- **Ollama** running on the host (if using local LLM): `ollama pull mistral-small3.1`
 - 4 GB+ RAM, 10 GB+ free disk space (for models + embeddings)
+
+Ollama runs inside the stack as a container — no host install needed. After the stack is up, pick and pull a model from the admin settings UI at `/admin/llm-settings`.
 
 ## Quick Start
 
@@ -64,20 +64,22 @@ docker compose ps
 curl http://localhost:8000/api/health
 ```
 
-Browse to **http://localhost** and register an account.
+Browse to **http://localhost:8000** and register an account.
 
 ## First-Time Setup
 
-1. Register a user account at `/register`
+1. Register a user account at `/register` — **the first registered user automatically becomes admin**
 2. Log in — your JWT token is stored in the browser
-3. Go to **Add Sources** and upload a PDF or enter a URL
-4. Wait for the ingestion job to complete (visible in the upload UI)
-5. Go to **Chat** and ask questions about your documents
+3. Visit `/admin/llm-settings` and pick / pull an Ollama model (or configure a cloud provider)
+4. Go to **Add Sources** and upload a PDF or enter a URL
+5. Wait for the ingestion job to complete (visible in the upload UI)
+6. Go to **Chat** and ask questions about your documents
 
 ### Admin: Configure LLM Provider
 
 An admin account is the first registered user. Visit `/admin/llm-settings` to:
 - Switch between Ollama, OpenAI, Anthropic, or any OpenAI-compatible endpoint
+- For Ollama: browse installed models and pull new ones directly from the UI
 - Set API keys (stored encrypted in the database)
 - Tune temperature and max tokens
 
@@ -89,8 +91,8 @@ An admin account is the first registered user. Visit `/admin/llm-settings` to:
 | `JWT_SECRET` | Yes | JWT signing key (64 random chars) |
 | `ENCRYPTION_KEY` | Yes | Fernet key for encrypting stored API keys |
 | `LLM_PROVIDER` | No | `ollama` (default), `openai`, `anthropic`, `generic` |
-| `LLM_MODEL` | No | Model name (default: `mistral-small3.1`) |
-| `LLM_BASE_URL` | No | Ollama URL (default: `http://host.docker.internal:11434`) |
+| `LLM_MODEL` | No | Model name. Leave blank to pick from the admin UI |
+| `LLM_BASE_URL` | No | Ollama URL (default: `http://ollama:11434` inside the stack) |
 | `OPENAI_API_KEY` | No | Required only when using OpenAI |
 | `ANTHROPIC_API_KEY` | No | Required only when using Anthropic |
 | `EMBED_MODEL` | No | HuggingFace embedding model (default: `BAAI/bge-large-en-v1.5`) |
@@ -105,16 +107,14 @@ See [`.env.example`](.env.example) for the full list with descriptions.
 Browser
   │
   ▼
-Nginx (80/443)          ← rate limiting, TLS termination
-  │
-  ▼
-FastAPI app (:8000)     ← REST API + Jinja2 templates
-  ├── PostgreSQL         ← users, documents, job records
-  ├── Qdrant             ← per-user vector collections
-  └── Redis → Worker     ← background document ingestion
+FastAPI app (:8000)        ← the only host-published service
+  ├── PostgreSQL            ← users, documents, job records
+  ├── Qdrant                ← per-user vector collections
+  ├── Redis → rag-worker    ← background document ingestion
+  └── Ollama                ← local LLM inference
 ```
 
-All six services are defined in [`docker-compose.yml`](docker-compose.yml). Data is persisted in named Docker volumes (`postgres_data`, `qdrant_data`, `uploads_data`).
+Only the `rag` container exposes a port to the host. Every other service (`postgres`, `qdrant`, `redis`, `ollama`, `rag-worker`) is reachable only from inside the Docker network. Data is persisted to `/storage/rag/` on the host.
 
 ## Production Deployment (VPS)
 
@@ -122,13 +122,11 @@ All six services are defined in [`docker-compose.yml`](docker-compose.yml). Data
 # On the server:
 git clone https://github.com/jemplayer82/RAG.git /opt/rag
 cd /opt/rag
-cp .env.example .env && nano .env   # fill in real secrets + domain
-
-# Update nginx.conf with your actual domain name, then:
+cp .env.example .env && nano .env   # fill in real secrets
 docker compose up -d
 ```
 
-For HTTPS, point your domain's A record to the server IP, then run Certbot to issue a Let's Encrypt certificate. Update the `ssl_certificate` paths in [`nginx.conf`](nginx.conf).
+For HTTPS on a public domain, put a TLS terminator (Caddy, Cloudflare Tunnel, or an OS-level nginx outside the stack) in front of port 8000. Nothing inside the stack handles TLS — that concern is deliberately left to the host.
 
 CI/CD is configured in [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) — add `VPS_HOST`, `VPS_USER`, and `VPS_SSH_KEY` to your GitHub repository secrets to enable auto-deploy on push to `master`.
 
