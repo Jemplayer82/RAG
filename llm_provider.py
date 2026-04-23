@@ -84,8 +84,12 @@ async def _call_anthropic(prompt: str, config: Dict) -> str:
 async def _call_ollama(prompt: str, config: Dict) -> str:
     from models import decrypt_api_key
 
-    base_url = (config.get("base_url") or os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")).rstrip("/")
-    model = config.get("model") or os.getenv("LLM_MODEL", "mistral-small3.1")
+    base_url = (config.get("base_url") or os.getenv("OLLAMA_BASE_URL", "http://ollama:11434")).rstrip("/")
+    model = (config.get("model") or os.getenv("LLM_MODEL", "")).strip()
+    if not model:
+        raise RuntimeError(
+            "No Ollama model configured. Visit /admin/llm-settings to pick and pull a model."
+        )
     raw_key = config.get("api_key", "")
     api_key = decrypt_api_key(raw_key) if raw_key else ""
     headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
@@ -152,8 +156,8 @@ async def _call_generic(prompt: str, config: Dict) -> str:
 def _config_from_env() -> Dict:
     return {
         "provider": os.getenv("LLM_PROVIDER", "ollama"),
-        "model": os.getenv("LLM_MODEL", "mistral-small3.1"),
-        "base_url": os.getenv("LLM_BASE_URL", os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")),
+        "model": os.getenv("LLM_MODEL", ""),
+        "base_url": os.getenv("LLM_BASE_URL", os.getenv("OLLAMA_BASE_URL", "http://ollama:11434")),
         "api_key": "",
         "temperature": float(os.getenv("LLM_TEMPERATURE", "0.3")),
         "top_p": float(os.getenv("LLM_TOP_P", "0.9")),

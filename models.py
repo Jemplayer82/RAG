@@ -91,7 +91,7 @@ class LLMProviderConfig(Base):
 
     id = Column(Integer, primary_key=True)
     provider = Column(String(50), nullable=False, default="ollama")   # openai | anthropic | ollama | generic
-    model = Column(String(255), nullable=False, default="mistral-small3.1")
+    model = Column(String(255), nullable=False, default="")
     api_key = Column(Text, nullable=True)        # Fernet-encrypted
     base_url = Column(String(500), nullable=True)  # Ollama or generic endpoint
     temperature = Column(Float, default=0.3)

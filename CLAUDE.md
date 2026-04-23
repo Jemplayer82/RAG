@@ -14,7 +14,7 @@ python worker.py            # separate terminal — processes ingestion jobs
 
 **Docker (production):**
 ```bash
-docker compose up -d        # starts all 7 services
+docker compose up -d        # starts all 6 services
 docker compose ps           # verify health
 docker compose logs -f rag  # tail app logs
 docker compose logs -f rag-worker
@@ -27,15 +27,16 @@ docker compose logs -f rag-worker
 ## Architecture
 
 ### Service Map (docker-compose.yml)
-| Container | Role |
-|-----------|------|
-| `rag` | FastAPI + Gunicorn, port 8001→8000 |
-| `rag-worker` | Redis RQ worker (`python worker.py`) |
-| `postgres` | User accounts, documents, jobs, LLM config |
-| `qdrant` | Vector store (per-user collections) |
-| `redis` | Job queue for ingestion |
-| `nginx` | Reverse proxy on port 80 |
-| `ollama` | Local LLM inference |
+| Container | Role | Host-exposed |
+|-----------|------|--------------|
+| `rag` | FastAPI + Gunicorn, port 8000→8000 | ✅ only published service |
+| `rag-worker` | Redis RQ worker (`python worker.py`) | internal only |
+| `postgres` | User accounts, documents, jobs, LLM config | internal only |
+| `qdrant` | Vector store (per-user collections) | internal only |
+| `redis` | Job queue for ingestion | internal only |
+| `ollama` | Local LLM inference | internal only |
+
+The `rag` service is the only container with a published port. All other services are reachable only via the Docker network (by hostname: `postgres`, `qdrant`, `redis`, `ollama`).
 
 Data volumes are mounted from `/storage/rag/` on the host (not named Docker volumes).
 
