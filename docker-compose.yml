@@ -39,7 +39,6 @@ services:
 
   rag:
     image: ghcr.io/jemplayer82/rag:latest
-    build: .
     ports:
       - "${RAG_PORT:-8000}:8000"
     environment:
@@ -83,7 +82,6 @@ services:
 
   rag-worker:
     image: ghcr.io/jemplayer82/rag:latest
-    build: .
     command: ["python", "worker.py"]
     environment:
       DATABASE_URL: postgresql://rag:${POSTGRES_PASSWORD}@postgres:5432/rag_db
