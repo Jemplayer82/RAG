@@ -111,43 +111,45 @@ services:
 
 # Named volumes with the "local" driver's bind option.
 # Portainer lists these under the stack and can create/remove them from its
-# UI, but the actual data lives at /storage/rag/<name> on the host. The host
+# UI, but the actual data lives at ${DATA_ROOT}/<name> on the host. Override
+# DATA_ROOT in your .env or Portainer env vars if /storage/rag is wrong for
+# your host (e.g. DATA_ROOT=/var/lib/rag or DATA_ROOT=/opt/rag/data). The
 # directories must exist before the first `docker compose up`:
 #
-#   sudo mkdir -p /storage/rag/{postgres,qdrant,redis,uploads,ollama}
+#   sudo mkdir -p "${DATA_ROOT:-/storage/rag}"/{postgres,qdrant,redis,uploads,ollama}
 #
 # Data survives `docker compose down` and stack removal. `docker compose
 # down -v` removes the volume references but will not delete the host files
 # (Docker doesn't own the path) — so the data persists until you `rm -rf`
-# /storage/rag/<name>/ manually.
+# the host directory manually.
 volumes:
   postgres_data:
     driver: local
     driver_opts:
       type: none
       o: bind
-      device: /storage/rag/postgres
+      device: ${DATA_ROOT:-/storage/rag}/postgres
   qdrant_data:
     driver: local
     driver_opts:
       type: none
       o: bind
-      device: /storage/rag/qdrant
+      device: ${DATA_ROOT:-/storage/rag}/qdrant
   redis_data:
     driver: local
     driver_opts:
       type: none
       o: bind
-      device: /storage/rag/redis
+      device: ${DATA_ROOT:-/storage/rag}/redis
   uploads_data:
     driver: local
     driver_opts:
       type: none
       o: bind
-      device: /storage/rag/uploads
+      device: ${DATA_ROOT:-/storage/rag}/uploads
   ollama_data:
     driver: local
     driver_opts:
       type: none
       o: bind
-      device: /storage/rag/ollama
+      device: ${DATA_ROOT:-/storage/rag}/ollama

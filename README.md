@@ -31,10 +31,12 @@ Ollama runs inside the stack as a container — no host install needed. After th
 ## Prerequisites (one-time, on every host)
 
 ```bash
-sudo mkdir -p /storage/rag/{postgres,qdrant,redis,uploads,ollama}
+# Pick a host directory. Default is /storage/rag. Override with DATA_ROOT.
+export DATA_ROOT=/storage/rag         # or /var/lib/rag, /opt/rag/data, etc.
+sudo mkdir -p "$DATA_ROOT"/{postgres,qdrant,redis,uploads,ollama}
 ```
 
-The stack uses named Docker volumes that bind to `/storage/rag/*` on the host, so these directories must exist before the first deploy. Portainer lists them in its Volumes UI per-stack; the data lives at predictable host paths for backup/restore.
+The stack uses named Docker volumes that bind-mount to `$DATA_ROOT/*` on the host, so these directories must exist before the first deploy. Portainer lists them in its Volumes UI per-stack; the data lives at predictable host paths for backup/restore. Override `DATA_ROOT` in your `.env` (or as a Portainer stack env var) if `/storage/rag` doesn't suit your host layout.
 
 ## Quick Start (Docker Compose)
 
@@ -55,7 +57,7 @@ Browse to **http://localhost:8000** and register an account.
 
 ## Quick Start (Portainer)
 
-Make sure `/storage/rag/{postgres,qdrant,redis,uploads,ollama}` exists on the host before deploying (see Prerequisites above) — named volumes with bind-mount `driver_opts` don't auto-create the host path.
+Make sure the host directories exist before deploying (see Prerequisites above) — named volumes with bind-mount `driver_opts` don't auto-create them.
 
 1. In Portainer → **Stacks** → **Add stack** → name it `rag`.
 2. Paste the contents of [`docker-compose.yml`](docker-compose.yml) into the web editor. (Do **not** include `docker-compose.override.yml` — that file triggers a local build and will fail in Portainer's paste-compose mode, which has no Dockerfile.)
@@ -93,6 +95,7 @@ An admin account is the first registered user. Visit `/admin/llm-settings` to:
 | `JWT_SECRET` | No | Auto-generated + persisted on first boot if unset |
 | `ENCRYPTION_KEY` | No | Auto-generated + persisted on first boot if unset |
 | `RAG_PORT` | No | Host port to publish the web UI on (default: `8000`) |
+| `DATA_ROOT` | No | Host directory that holds data subdirs (default: `/storage/rag`) |
 | `LLM_PROVIDER` | No | `ollama` (default), `openai`, `anthropic`, `generic` |
 | `LLM_MODEL` | No | Model name. Leave blank to pick from the admin UI |
 | `LLM_BASE_URL` | No | Ollama URL (default: `http://ollama:11434` inside the stack) |
