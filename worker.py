@@ -13,6 +13,10 @@ import logging
 import os
 from datetime import datetime
 
+# Ensure JWT_SECRET + ENCRYPTION_KEY are set before any module reads them.
+from secrets_bootstrap import bootstrap_secrets
+bootstrap_secrets()
+
 import sys
 from redis import Redis
 from rq import Worker, Queue

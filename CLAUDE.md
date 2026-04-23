@@ -56,7 +56,9 @@ If Redis is unavailable, the job falls back to `asyncio.create_task()` running i
 
 **LLM provider routing (`llm_provider.py`):** Active config lives in the `llm_provider_configs` table (single row). Admin sets it at `/admin/llm-settings`. Falls back to env vars (`LLM_PROVIDER`, `LLM_MODEL`, etc.) if no DB row exists. Supported providers: `ollama`, `openai`, `anthropic`, `generic` (OpenAI-compatible).
 
-**API key encryption:** LLM provider API keys are Fernet-encrypted before writing to Postgres (`encrypt_api_key` / `decrypt_api_key` in `models.py`). The `ENCRYPTION_KEY` env var must be a base64url-encoded 32-byte key. If missing, a random key is generated per-process (keys become unreadable after restart).
+**API key encryption:** LLM provider API keys are Fernet-encrypted before writing to Postgres (`encrypt_api_key` / `decrypt_api_key` in `models.py`). The `ENCRYPTION_KEY` env var must be a base64url-encoded 32-byte key. The cipher is cached at module level so repeated calls round-trip cleanly.
+
+**Secrets bootstrap (`secrets_bootstrap.py`):** At the top of `app_fastapi.py` and `worker.py`, `bootstrap_secrets()` runs before any other imports. It ensures `JWT_SECRET` and `ENCRYPTION_KEY` are populated in `os.environ` by: (1) keeping any real value already set, else (2) reading persisted values from `/app/data/.secrets.env`, else (3) generating fresh values and writing them to that file. This is what lets Portainer deploys work with only `POSTGRES_PASSWORD` set — the app self-heals the rest on first boot and keeps them across image pulls (the file is on the bind-mounted data volume).
 
 **Embedding model:** Hardcoded dimension `EMBED_DIM = 1024` in `ingest_async.py` for `BAAI/bge-large-en-v1.5`. Changing `EMBED_MODEL` to a different-dimension model requires updating this constant and recreating Qdrant collections.
 

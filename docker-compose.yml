@@ -10,7 +10,7 @@ services:
     environment:
       POSTGRES_DB: rag_db
       POSTGRES_USER: rag
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}"
     volumes:
       - /storage/rag/postgres:/var/lib/postgresql/data
     healthcheck:
@@ -38,14 +38,36 @@ services:
     restart: unless-stopped
 
   rag:
+    image: ghcr.io/jemplayer82/rag:latest
     build: .
     ports:
-      - "8000:8000"
-    env_file: .env
+      - "${RAG_PORT:-8000}:8000"
     environment:
-      - DATABASE_URL=postgresql://rag:${POSTGRES_PASSWORD}@postgres:5432/rag_db
-      - QDRANT_HOST=qdrant
-      - REDIS_URL=redis://redis:6379/0
+      DATABASE_URL: postgresql://rag:${POSTGRES_PASSWORD}@postgres:5432/rag_db
+      QDRANT_HOST: qdrant
+      QDRANT_PORT: "6333"
+      REDIS_URL: redis://redis:6379/0
+      # JWT_SECRET and ENCRYPTION_KEY auto-generate on first boot if unset.
+      # Override here to pin specific values; otherwise they persist in the
+      # data volume at /app/data/.secrets.env.
+      JWT_SECRET: ${JWT_SECRET:-}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-}
+      LLM_PROVIDER: ${LLM_PROVIDER:-ollama}
+      LLM_MODEL: ${LLM_MODEL:-}
+      LLM_BASE_URL: ${LLM_BASE_URL:-http://ollama:11434}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
+      LLM_TEMPERATURE: ${LLM_TEMPERATURE:-0.3}
+      LLM_TOP_P: ${LLM_TOP_P:-0.9}
+      LLM_MAX_TOKENS: ${LLM_MAX_TOKENS:-2048}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      EMBED_MODEL: ${EMBED_MODEL:-BAAI/bge-large-en-v1.5}
+      EMBED_DEVICE: ${EMBED_DEVICE:-cpu}
+      CHUNK_SIZE: ${CHUNK_SIZE:-600}
+      CHUNK_OVERLAP: ${CHUNK_OVERLAP:-100}
+      TOP_K: ${TOP_K:-8}
+      RERANK_TOP_K: ${RERANK_TOP_K:-5}
+      DEBUG: ${DEBUG:-false}
     volumes:
       - /storage/rag/uploads:/app/data
     depends_on:
@@ -60,13 +82,20 @@ services:
     restart: unless-stopped
 
   rag-worker:
+    image: ghcr.io/jemplayer82/rag:latest
     build: .
     command: ["python", "worker.py"]
-    env_file: .env
     environment:
-      - DATABASE_URL=postgresql://rag:${POSTGRES_PASSWORD}@postgres:5432/rag_db
-      - QDRANT_HOST=qdrant
-      - REDIS_URL=redis://redis:6379/0
+      DATABASE_URL: postgresql://rag:${POSTGRES_PASSWORD}@postgres:5432/rag_db
+      QDRANT_HOST: qdrant
+      QDRANT_PORT: "6333"
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET: ${JWT_SECRET:-}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-}
+      EMBED_MODEL: ${EMBED_MODEL:-BAAI/bge-large-en-v1.5}
+      EMBED_DEVICE: ${EMBED_DEVICE:-cpu}
+      CHUNK_SIZE: ${CHUNK_SIZE:-600}
+      CHUNK_OVERLAP: ${CHUNK_OVERLAP:-100}
     volumes:
       - /storage/rag/uploads:/app/data
     depends_on:

@@ -28,43 +28,33 @@ A self-hosted web app that lets multiple users upload documents (PDF, TXT, or UR
 
 Ollama runs inside the stack as a container — no host install needed. After the stack is up, pick and pull a model from the admin settings UI at `/admin/llm-settings`.
 
-## Quick Start
+## Quick Start (Docker Compose)
 
 ```bash
-# 1. Clone the repo
 git clone https://github.com/jemplayer82/RAG.git
 cd RAG
-
-# 2. Configure environment
 cp .env.example .env
-```
-
-Open `.env` and set **at minimum** these three values:
-```env
-POSTGRES_PASSWORD=<strong-password>
-JWT_SECRET=<64-random-chars>
-ENCRYPTION_KEY=<fernet-key>
-```
-
-Generate values with:
-```bash
-# JWT_SECRET
-python3 -c "import secrets; print(secrets.token_hex(32))"
-
-# ENCRYPTION_KEY (Fernet-compatible — 32 random bytes, base64url-encoded)
-python3 -c "import base64, os; print(base64.urlsafe_b64encode(os.urandom(32)).decode())"
-```
-
-```bash
-# 3. Start all services
+# Edit .env — only POSTGRES_PASSWORD must be set
 docker compose up -d
-
-# 4. Verify everything is healthy
-docker compose ps
 curl http://localhost:8000/api/health
 ```
 
+`JWT_SECRET` and `ENCRYPTION_KEY` auto-generate on first boot and persist to `/storage/rag/uploads/.secrets.env`, so they survive image pulls and stack restarts. Override them in `.env` only if you need to pin specific values.
+
 Browse to **http://localhost:8000** and register an account.
+
+## Quick Start (Portainer)
+
+1. In Portainer → **Stacks** → **Add stack** → name it `rag`.
+2. Point it at this repository (or paste `docker-compose.yml` into the web editor).
+3. Under **Environment variables**, add:
+   - `POSTGRES_PASSWORD` — required, any strong string
+   - (optional) `RAG_PORT` if you need something other than `8000`
+   - (optional) `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` if you plan to use a cloud LLM
+4. **Deploy the stack**.
+5. Browse to `http://<host>:8000` and register.
+
+The app writes `JWT_SECRET` and `ENCRYPTION_KEY` into the data volume on first boot. Pulling a newer image via Portainer keeps them — they live on the host at `/storage/rag/uploads/.secrets.env`, not inside the container. Back that file up to survive a volume wipe.
 
 ## First-Time Setup
 
@@ -88,8 +78,9 @@ An admin account is the first registered user. Visit `/admin/llm-settings` to:
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `POSTGRES_PASSWORD` | Yes | PostgreSQL password |
-| `JWT_SECRET` | Yes | JWT signing key (64 random chars) |
-| `ENCRYPTION_KEY` | Yes | Fernet key for encrypting stored API keys |
+| `JWT_SECRET` | No | Auto-generated + persisted on first boot if unset |
+| `ENCRYPTION_KEY` | No | Auto-generated + persisted on first boot if unset |
+| `RAG_PORT` | No | Host port to publish the web UI on (default: `8000`) |
 | `LLM_PROVIDER` | No | `ollama` (default), `openai`, `anthropic`, `generic` |
 | `LLM_MODEL` | No | Model name. Leave blank to pick from the admin UI |
 | `LLM_BASE_URL` | No | Ollama URL (default: `http://ollama:11434` inside the stack) |

@@ -36,6 +36,10 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
+# Ensure JWT_SECRET + ENCRYPTION_KEY are set before any module reads them.
+from secrets_bootstrap import bootstrap_secrets
+bootstrap_secrets()
+
 import httpx
 import jwt
 import aiofiles
