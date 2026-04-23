@@ -155,7 +155,30 @@ def get_session_local():
     return sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
-def init_db():
-    """Create all tables. Call once on startup."""
+def init_db(max_attempts: int = 60, delay: float = 1.0):
+    """
+    Create all tables. Retries on transient connection errors so the app can
+    ride out the startup window where Postgres is ready but the Docker DNS or
+    database creation hasn't finished propagating yet.
+    """
+    import time
+
     engine = get_engine()
-    Base.metadata.create_all(bind=engine)
+    last_error = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            Base.metadata.create_all(bind=engine)
+            if attempt > 1:
+                logger.info("DB schema initialized on attempt %d/%d", attempt, max_attempts)
+            return
+        except Exception as e:
+            last_error = e
+            logger.warning(
+                "DB not reachable yet (attempt %d/%d): %s",
+                attempt, max_attempts, type(e).__name__,
+            )
+            time.sleep(delay)
+    raise RuntimeError(
+        f"Could not connect to the database after {max_attempts} attempts. "
+        f"Last error: {last_error}"
+    )
