@@ -470,3 +470,139 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     build_index(force_refresh=args.force_refresh)
+
+# ============================================================================
+# WEB CRAWL: BFS across same-domain links (relevance heuristic)
+# ============================================================================
+
+import urllib.robotparser
+from urllib.parse import urljoin, urlparse, urldefrag
+from collections import deque
+
+_SKIP_EXTS = (
+    ".pdf", ".jpg", ".jpeg", ".png", ".gif", ".svg", ".webp", ".ico",
+    ".zip", ".tar", ".gz", ".7z", ".rar",
+    ".mp3", ".mp4", ".webm", ".avi", ".mov", ".wav", ".m4a",
+    ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+    ".css", ".js", ".woff", ".woff2", ".ttf",
+)
+
+
+def _normalize_url(url: str) -> str:
+    url, _ = urldefrag(url)
+    p = urlparse(url)
+    netloc = p.netloc.lower()
+    path = p.path or "/"
+    return p._replace(netloc=netloc, path=path).geturl()
+
+
+def _extract_links(html_text: str, base_url: str):
+    soup = BeautifulSoup(html_text, "html.parser")
+    out = []
+    for a in soup.find_all("a", href=True):
+        href = (a.get("href") or "").strip()
+        if not href or href.startswith(("javascript:", "mailto:", "tel:", "#")):
+            continue
+        absolute = urljoin(base_url, href)
+        if absolute.startswith(("http://", "https://")):
+            out.append(absolute)
+    return out
+
+
+def _is_relevant(link: str, seed: str, same_domain_only: bool) -> bool:
+    seed_p = urlparse(seed)
+    link_p = urlparse(link)
+    if any(link_p.path.lower().endswith(ext) for ext in _SKIP_EXTS):
+        return False
+    if same_domain_only and link_p.netloc.lower() != seed_p.netloc.lower():
+        return False
+    return True
+
+
+def _fetch_page(url: str):
+    response = requests.get(url, timeout=20, headers={"User-Agent": "Mozilla/5.0 (RAGCrawler)"})
+    response.raise_for_status()
+    ct = (response.headers.get("Content-Type") or "").lower()
+    if "html" not in ct and "xml" not in ct and "text" not in ct:
+        raise ValueError(f"Non-HTML content type: {ct}")
+    html_bytes = response.content
+    soup = BeautifulSoup(html_bytes, "html.parser")
+    for tag in soup(["script", "style", "nav", "footer", "header", "aside"]):
+        tag.decompose()
+    text = soup.get_text(separator="\n", strip=True)
+    return text, html_bytes.decode("utf-8", errors="ignore")
+
+
+def ingest_crawl(
+    seed_url: str,
+    title: str,
+    max_depth: int = 2,
+    max_pages: int = 20,
+    same_domain_only: bool = True,
+) -> Tuple[List[Dict], int]:
+    """
+    BFS-crawl from seed_url. Each visited page contributes chunks tagged
+    with its actual page URL. Respects robots.txt; same-domain by default.
+    """
+    seed_norm = _normalize_url(seed_url)
+    parsed = urlparse(seed_url)
+    robots_url = f"{parsed.scheme}://{parsed.netloc}/robots.txt"
+    rp = urllib.robotparser.RobotFileParser()
+    try:
+        rp.set_url(robots_url)
+        rp.read()
+        check_robots = True
+    except Exception:
+        check_robots = False
+
+    def can_fetch(url):
+        if not check_robots:
+            return True
+        try:
+            return rp.can_fetch("RAGCrawler", url)
+        except Exception:
+            return True
+
+    visited = set()
+    queue = deque([(seed_norm, 0)])
+    pages = []
+    total_chars = 0
+
+    while queue and len(pages) < max_pages:
+        url, depth = queue.popleft()
+        if url in visited:
+            continue
+        visited.add(url)
+        if not can_fetch(url):
+            logger.info(f"[CRAWL] robots.txt disallow: {url}")
+            continue
+        try:
+            text, html_text = _fetch_page(url)
+        except Exception as e:
+            logger.warning(f"[CRAWL] fetch failed {url}: {e}")
+            continue
+        if len(text) < 100:
+            logger.info(f"[CRAWL] thin content, skip: {url}")
+            continue
+        pages.append((url, text))
+        total_chars += len(text)
+        logger.info(f"[CRAWL] {url} (depth={depth}, {len(text)} chars, page {len(pages)}/{max_pages})")
+        if depth < max_depth:
+            for link in _extract_links(html_text, url):
+                norm = _normalize_url(link)
+                if norm in visited:
+                    continue
+                if _is_relevant(norm, seed_url, same_domain_only):
+                    queue.append((norm, depth + 1))
+
+    if not pages:
+        raise ValueError(f"Crawl extracted no content from {seed_url}")
+
+    all_chunks = []
+    for page_url, text in pages:
+        page_chunks = chunk_text(text, title, "url", page_url, extra_meta={"page_url": page_url})
+        all_chunks.extend(page_chunks)
+
+    word_count = total_chars // 5
+    logger.info(f"[CRAWL] {title}: {len(pages)} pages → {len(all_chunks)} chunks")
+    return all_chunks, word_count

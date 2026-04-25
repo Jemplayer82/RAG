@@ -22,7 +22,7 @@ from config import (
     QDRANT_HOST, QDRANT_PORT,
     CHUNK_SIZE, CHUNK_OVERLAP
 )
-from ingest import chunk_text, ingest_pdf, ingest_txt, ingest_url, ingest_docx, ingest_doc
+from ingest import chunk_text, ingest_pdf, ingest_txt, ingest_url, ingest_docx, ingest_doc, ingest_crawl
 
 logger = logging.getLogger(__name__)
 
@@ -164,7 +164,11 @@ def run_ingestion_job(
     doc_type: str,
     user_id: int,
     url: str = "",
-    doc_id_prefix: str = ""
+    doc_id_prefix: str = "",
+    crawl: bool = False,
+    max_depth: int = 2,
+    max_pages: int = 20,
+    same_domain_only: bool = True,
 ) -> int:
     """
     Synchronous function executed by Redis RQ worker.
@@ -183,7 +187,10 @@ def run_ingestion_job(
     elif doc_type == "doc":
         chunks, _ = ingest_doc(file_path, title, url)
     elif doc_type == "url":
-        chunks, _ = ingest_url(url, title)
+        if crawl:
+            chunks, _ = ingest_crawl(url, title, max_depth=max_depth, max_pages=max_pages, same_domain_only=same_domain_only)
+        else:
+            chunks, _ = ingest_url(url, title)
     else:
         raise ValueError(f"Unknown doc_type: {doc_type}")
 
