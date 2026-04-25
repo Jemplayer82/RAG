@@ -10,12 +10,12 @@
             <div class="card-body">
                 <form id="loginForm">
                     <div class="mb-3">
-                        <label class="form-label">Username</label>
-                        <input type="text" class="form-control" id="username" required autofocus>
+                        <label for="username" class="form-label">Username</label>
+                        <input type="text" class="form-control" id="username" name="username" autocomplete="username" required autofocus>
                     </div>
                     <div class="mb-3">
-                        <label class="form-label">Password</label>
-                        <input type="password" class="form-control" id="password" required>
+                        <label for="password" class="form-label">Password</label>
+                        <input type="password" class="form-control" id="password" name="password" autocomplete="current-password" required>
                     </div>
                     <button type="submit" class="btn btn-primary w-100">Login</button>
                 </form>
