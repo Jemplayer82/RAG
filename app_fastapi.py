@@ -47,7 +47,7 @@ from fastapi import (
     FastAPI, Depends, HTTPException, UploadFile, File,
     Form, Request, status
 )
-from fastapi.responses import JSONResponse, HTMLResponse, StreamingResponse
+from fastapi.responses import JSONResponse, HTMLResponse, StreamingResponse, FileResponse, RedirectResponse
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -534,6 +534,32 @@ async def get_job_status(
         "created_at": job.created_at.isoformat(),
         "completed_at": job.completed_at.isoformat() if job.completed_at else None,
     }
+
+
+@app.get("/api/sources/{doc_id}/download")
+async def download_source(
+    doc_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Stream the original uploaded file. URL-typed docs return a redirect."""
+    admin_id = get_admin_user_id(db)
+    doc = db.query(Document).filter(Document.id == doc_id, Document.user_id == admin_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    if doc.doc_type == "url":
+        if not doc.url:
+            raise HTTPException(status_code=400, detail="URL document has no URL")
+        return RedirectResponse(url=doc.url, status_code=302)
+
+    if not doc.cached_path:
+        raise HTTPException(status_code=404, detail="No file path on record")
+    p = Path(doc.cached_path)
+    if not p.is_file():
+        raise HTTPException(status_code=404, detail="File missing on disk")
+    download_name = p.name.split("_", 1)[-1] if "_" in p.name else p.name
+    return FileResponse(p, filename=download_name)
 
 
 @app.delete("/api/sources/{doc_id}")
