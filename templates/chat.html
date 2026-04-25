@@ -72,6 +72,7 @@
 
 {% block scripts %}
 <script>
+(() => { if (!localStorage.getItem('rag_token')) window.location.href = '/login'; })();
 const loadingModal = new bootstrap.Modal(document.getElementById('loadingModal'), { backdrop: 'static', keyboard: false });
 
 document.getElementById('queryForm').addEventListener('submit', async (e) => {
@@ -89,10 +90,14 @@ document.getElementById('queryForm').addEventListener('submit', async (e) => {
 
         const response = await fetch('/api/chat', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + localStorage.getItem('rag_token')
+            },
             body: JSON.stringify({ question, chat_history: [] })
         });
 
+        if (response.status === 401) { localStorage.removeItem('rag_token'); window.location.href = '/login'; return; }
         if (!response.ok) {
             const error = await response.json();
             throw new Error(error.detail || 'Query failed');
