@@ -179,11 +179,25 @@ async def query_async(
         else:
             sources_text += f"\n[{i}] {citation}\n{source['text']}\n"
 
+        # Pick a short, deterministic excerpt to anchor the citation.
+        # Browsers honor URL Text Fragments (#:~:text=) for in-page highlight.
+        page_url = meta.get("page_url") or url
+        excerpt_raw = (source.get("text") or "").strip().split("
+", 1)[0][:120]
+        from urllib.parse import quote
+        if page_url and excerpt_raw:
+            page_url_with_anchor = f"{page_url}#:~:text={quote(excerpt_raw)}"
+        else:
+            page_url_with_anchor = page_url
         source_citations.append({
             "index": i,
             "citation": citation,
             "doc_type": meta.get("doc_type", "unknown"),
             "url": url,
+            "page_url": page_url,
+            "anchor_url": page_url_with_anchor,
+            "excerpt": excerpt_raw,
+            "doc_id": meta.get("doc_id", None),
         })
 
     prompt = RAG_PROMPT_TEMPLATE.format(

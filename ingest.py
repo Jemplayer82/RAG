@@ -76,8 +76,24 @@ def chunk_text(text: str, title: str, doc_type: str, url: str = "", extra_meta: 
     if extra_meta is None:
         extra_meta = {}
 
+    import re
     chunks = []
-    paragraphs = text.split("\n\n")
+    raw_paragraphs = text.split("\n\n")
+    paragraphs = []
+    max_chars = CHUNK_SIZE * 4
+    for p in raw_paragraphs:
+        p = p.strip()
+        if not p:
+            continue
+        if count_tokens(p) <= CHUNK_SIZE:
+            paragraphs.append(p)
+            continue
+        sentences = re.split(r"(?<=[.!?])\s+", p)
+        if len(sentences) > 1:
+            paragraphs.extend(s.strip() for s in sentences if s.strip())
+        else:
+            for i in range(0, len(p), max_chars):
+                paragraphs.append(p[i:i + max_chars])
     buffer = ""
     chunk_index = 0
 
@@ -250,7 +266,7 @@ def _extract_text_requests(url: str) -> str:
     soup = BeautifulSoup(response.content, "html.parser")
     for tag in soup(["script", "style", "nav", "footer", "header", "aside"]):
         tag.decompose()
-    return soup.get_text(separator="\n", strip=True)
+    return soup.get_text(separator="\n\n", strip=True)
 
 
 def _extract_text_scrapling(url: str) -> str:
@@ -533,7 +549,7 @@ def _fetch_page(url: str):
     soup = BeautifulSoup(html_bytes, "html.parser")
     for tag in soup(["script", "style", "nav", "footer", "header", "aside"]):
         tag.decompose()
-    text = soup.get_text(separator="\n", strip=True)
+    text = soup.get_text(separator="\n\n", strip=True)
     return text, html_bytes.decode("utf-8", errors="ignore")
 
 
