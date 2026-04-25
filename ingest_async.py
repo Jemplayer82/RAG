@@ -169,6 +169,7 @@ def run_ingestion_job(
     max_depth: int = 2,
     max_pages: int = 20,
     same_domain_only: bool = True,
+    respect_robots: bool = False,
 ) -> int:
     """
     Synchronous function executed by Redis RQ worker.
@@ -188,7 +189,7 @@ def run_ingestion_job(
         chunks, _ = ingest_doc(file_path, title, url)
     elif doc_type == "url":
         if crawl:
-            chunks, _ = ingest_crawl(url, title, max_depth=max_depth, max_pages=max_pages, same_domain_only=same_domain_only)
+            chunks, _ = ingest_crawl(url, title, max_depth=max_depth, max_pages=max_pages, same_domain_only=same_domain_only, respect_robots=respect_robots)
         else:
             chunks, _ = ingest_url(url, title)
     else:

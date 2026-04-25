@@ -475,9 +475,13 @@ if __name__ == "__main__":
 # WEB CRAWL: BFS across same-domain links (relevance heuristic)
 # ============================================================================
 
-import urllib.robotparser
 from urllib.parse import urljoin, urlparse, urldefrag
 from collections import deque
+
+try:
+    from protego import Protego
+except Exception:
+    Protego = None
 
 _SKIP_EXTS = (
     ".pdf", ".jpg", ".jpeg", ".png", ".gif", ".svg", ".webp", ".ico",
@@ -539,27 +543,29 @@ def ingest_crawl(
     max_depth: int = 2,
     max_pages: int = 20,
     same_domain_only: bool = True,
+    respect_robots: bool = False,
 ) -> Tuple[List[Dict], int]:
     """
     BFS-crawl from seed_url. Each visited page contributes chunks tagged
     with its actual page URL. Respects robots.txt; same-domain by default.
     """
     seed_norm = _normalize_url(seed_url)
-    parsed = urlparse(seed_url)
-    robots_url = f"{parsed.scheme}://{parsed.netloc}/robots.txt"
-    rp = urllib.robotparser.RobotFileParser()
-    try:
-        rp.set_url(robots_url)
-        rp.read()
-        check_robots = True
-    except Exception:
-        check_robots = False
+    rp = None
+    if respect_robots and Protego is not None:
+        parsed = urlparse(seed_url)
+        robots_url = f"{parsed.scheme}://{parsed.netloc}/robots.txt"
+        try:
+            r = requests.get(robots_url, timeout=10, headers={"User-Agent": "RAGCrawler"})
+            if r.status_code == 200:
+                rp = Protego.parse(r.text)
+        except Exception as e:
+            logger.warning(f"[CRAWL] robots.txt fetch failed: {e}")
 
     def can_fetch(url):
-        if not check_robots:
+        if rp is None:
             return True
         try:
-            return rp.can_fetch("RAGCrawler", url)
+            return rp.can_fetch(url, "RAGCrawler")
         except Exception:
             return True
 

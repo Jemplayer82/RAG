@@ -381,6 +381,7 @@ async def add_source(
     max_depth: int = Form(2),
     max_pages: int = Form(20),
     same_domain_only: bool = Form(True),
+    respect_robots: bool = Form(False),
     user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
@@ -452,6 +453,7 @@ async def add_source(
                 "max_depth": max_depth,
                 "max_pages": max_pages,
                 "same_domain_only": same_domain_only,
+                "respect_robots": respect_robots,
             },
             job_timeout=600,
             result_ttl=3600,
@@ -473,7 +475,7 @@ async def add_source(
                     run_ingestion_job,
                     file_path=file_path, title=title, doc_type=doc_type,
                     user_id=user.id, url=source_url, doc_id_prefix=doc_id_prefix,
-                    crawl=crawl, max_depth=max_depth, max_pages=max_pages, same_domain_only=same_domain_only,
+                    crawl=crawl, max_depth=max_depth, max_pages=max_pages, same_domain_only=same_domain_only, respect_robots=respect_robots,
                 )
                 doc.chunks = count
                 job_record.status = "complete"
