@@ -84,6 +84,26 @@
                             <label for="urlTitleInput" class="form-label">Document Title <span class="text-danger">*</span></label>
                             <input type="text" class="form-control" id="urlTitleInput" placeholder="e.g., Product Documentation" required>
                         </div>
+                        <div class="form-check mb-2">
+                            <input class="form-check-input" type="checkbox" id="urlCrawlCheck">
+                            <label class="form-check-label" for="urlCrawlCheck">Crawl site (follow relevant links)</label>
+                        </div>
+                        <div id="urlCrawlOpts" class="row g-2 mb-3" style="display:none;">
+                            <div class="col-4">
+                                <label class="form-label small mb-0">Max depth</label>
+                                <input type="number" class="form-control form-control-sm" id="urlMaxDepth" value="2" min="1" max="4">
+                            </div>
+                            <div class="col-4">
+                                <label class="form-label small mb-0">Max pages</label>
+                                <input type="number" class="form-control form-control-sm" id="urlMaxPages" value="20" min="1" max="200">
+                            </div>
+                            <div class="col-4 d-flex align-items-end">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="urlSameDomain" checked>
+                                    <label class="form-check-label small" for="urlSameDomain">Same domain only</label>
+                                </div>
+                            </div>
+                        </div>
                         <button type="submit" class="btn btn-success" id="urlSubmitBtn">
                             <i class="bi bi-cloud-download"></i> Fetch & Ingest
                         </button>
@@ -219,6 +239,10 @@ document.getElementById('fileUploadForm').addEventListener('submit', async (e) =
 });
 
 // ---- URL Ingestion ----
+document.getElementById('urlCrawlCheck').addEventListener('change', (e) => {
+    document.getElementById('urlCrawlOpts').style.display = e.target.checked ? '' : 'none';
+});
+
 document.getElementById('urlForm').addEventListener('submit', async (e) => {
     e.preventDefault();
 
@@ -231,13 +255,21 @@ document.getElementById('urlForm').addEventListener('submit', async (e) => {
     setProgress('url', 5, 'Submitting URL...');
 
     try {
+        const fd = new FormData();
+        fd.append('type', 'url');
+        fd.append('url', url);
+        fd.append('title', title);
+        const crawl = document.getElementById('urlCrawlCheck').checked;
+        fd.append('crawl', crawl ? 'true' : 'false');
+        if (crawl) {
+            fd.append('max_depth', document.getElementById('urlMaxDepth').value || '2');
+            fd.append('max_pages', document.getElementById('urlMaxPages').value || '20');
+            fd.append('same_domain_only', document.getElementById('urlSameDomain').checked ? 'true' : 'false');
+        }
         const response = await fetch('/api/sources', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${localStorage.getItem('rag_token')}`
-            },
-            body: JSON.stringify({ type: 'url', url, title })
+            headers: { 'Authorization': `Bearer ${localStorage.getItem('rag_token')}` },
+            body: fd
         });
 
         if (response.status === 401) {
