@@ -105,6 +105,7 @@ document.getElementById('queryForm').addEventListener('submit', async (e) => {
 
         const result = await response.json();
 
+        window.lastSources = result.sources || [];
         addMessageToHistory('assistant', result.answer);
         updateSourcesPanel(result.sources);
 
@@ -143,7 +144,7 @@ function addMessageToHistory(role, content) {
             .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
             .replace(/__(.*?)__/g, '<em>$1</em>')
             .replace(/- /g, '• ')
-            .replace(/\[(\d+)\]/g, '<span class="badge bg-info">[<span style="color: white;">$1</span>]</span>');
+            .replace(/\[(\d+)\]/g, (m, n) => { const s = (window.lastSources||[])[parseInt(n)-1]; const href = s && (s.anchor_url || s.page_url || s.url); if (href) { return '<a href="' + href.replace(/"/g, '&quot;') + '" target="_blank" rel="noopener" class="badge bg-info text-white text-decoration-none">[' + n + ']</a>'; } return '<span class="badge bg-info text-white">[' + n + ']</span>'; });
     }
 
     messageDiv.appendChild(bubble);
@@ -172,14 +173,17 @@ function updateSourcesPanel(sources) {
     sources.forEach(source => {
         const icon = '<i class="bi bi-file-earmark-text" style="color: #0d6efd;"></i>';
 
-        if (source.url) {
+        const target = source.anchor_url || source.page_url || source.url || '';
+        const excerpt = (source.excerpt || '').slice(0, 140);
+        if (target) {
             html += `
-                <a href="${source.url}" target="_blank" class="list-group-item list-group-item-action py-2">
+                <a href="${target}" target="_blank" rel="noopener" class="list-group-item list-group-item-action py-2">
                     <div class="d-flex align-items-start justify-content-between">
                         <div style="flex: 1;">
                             <div class="mb-1">
                                 <small class="fw-bold">${icon} [${source.index}] ${source.citation}</small>
                             </div>
+                            ${excerpt ? `<small class="text-muted d-block fst-italic">"${escapeHtml(excerpt)}…"</small>` : ''}
                             <small class="text-muted">${source.doc_type}</small>
                         </div>
                         <i class="bi bi-box-arrow-up-right" style="color: #999; margin-left: 8px;"></i>
@@ -192,6 +196,7 @@ function updateSourcesPanel(sources) {
                     <div>
                         <small class="fw-bold">${icon} [${source.index}] ${source.citation}</small>
                     </div>
+                    ${excerpt ? `<small class="text-muted d-block fst-italic">"${escapeHtml(excerpt)}…"</small>` : ''}
                     <small class="text-muted">${source.doc_type}</small>
                 </div>
             `;
