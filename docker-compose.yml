@@ -86,7 +86,7 @@ services:
     pull_policy: always
     command: ["python", "worker.py"]
     healthcheck:
-      test: ["CMD-SHELL", "rq info --url $$REDIS_URL --raw 2>/dev/null | grep -q workers || exit 1"]
+      test: ["CMD-SHELL", "rq info --url $$REDIS_URL --raw 2>/dev/null | grep -q '^worker ' || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
