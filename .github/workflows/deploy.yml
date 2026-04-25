@@ -44,6 +44,7 @@ jobs:
       - name: Deploy
         run: |
           cd /opt/rag
+          git config --global --add safe.directory /opt/rag
           git pull
           docker compose pull rag rag-worker
           docker compose up -d --no-deps rag rag-worker
