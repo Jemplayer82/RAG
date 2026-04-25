@@ -73,7 +73,7 @@ function renderRow(doc) {
     const badge = TYPE_BADGE[doc.doc_type] || 'bg-secondary';
     const title = doc.url
         ? `<a href="${escapeHtml(doc.url)}" target="_blank" rel="noopener">${escapeHtml(doc.title)}</a>`
-        : `<a href="/api/sources/${doc.id}/download" target="_blank" rel="noopener">${escapeHtml(doc.title)}</a>`;
+        : `<a href="#" data-download="${doc.id}" data-name="${escapeHtml(doc.title)}">${escapeHtml(doc.title)}</a>`;
     const created = new Date(doc.created_at).toLocaleString();
     const actions = isAdmin
         ? `<button class="btn btn-sm btn-outline-danger" data-delete="${doc.id}" title="Delete"><i class="bi bi-trash"></i></button>`
@@ -109,6 +109,34 @@ function renderTable() {
         return sortDirection === 'asc' ? cmp : -cmp;
     });
     tbody.innerHTML = sorted.map(renderRow).join('');
+
+    tbody.querySelectorAll('a[data-download]').forEach(a => {
+        a.addEventListener('click', async (e) => {
+            e.preventDefault();
+            const id = a.dataset.download;
+            const fallbackName = a.dataset.name || ('document_' + id);
+            const token = localStorage.getItem('rag_token');
+            try {
+                const resp = await fetch('/api/sources/' + id + '/download', { headers: { Authorization: 'Bearer ' + token } });
+                if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                let filename = fallbackName;
+                const cd = resp.headers.get('Content-Disposition') || '';
+                const m = /filename*?=(?:UTF-8''|")?([^";]+)/i.exec(cd);
+                if (m) filename = decodeURIComponent(m[1].replace(/"$/, ''));
+                const blob = await resp.blob();
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = filename;
+                document.body.appendChild(link);
+                link.click();
+                link.remove();
+                setTimeout(() => URL.revokeObjectURL(url), 1000);
+            } catch (err) {
+                alert('Download failed: ' + err.message);
+            }
+        });
+    });
 
     tbody.querySelectorAll('button[data-delete]').forEach(btn => {
         btn.addEventListener('click', async () => {
