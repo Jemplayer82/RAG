@@ -114,7 +114,7 @@ function renderTable() {
         btn.addEventListener('click', async () => {
             const id = btn.dataset.delete;
             if (!confirm('Delete this document?')) return;
-            const token = localStorage.getItem('token');
+            const token = localStorage.getItem('rag_token');
             const resp = await fetch(`/api/sources/${id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
             if (!resp.ok) {
                 const err = await resp.text();
@@ -128,11 +128,11 @@ function renderTable() {
 }
 
 async function loadLibrary() {
-    const token = localStorage.getItem('token');
+    const token = localStorage.getItem('rag_token');
     if (!token) { window.location.href = '/login'; return; }
     try {
         const meResp = await fetch('/api/auth/me', { headers: { Authorization: `Bearer ${token}` } });
-        if (!meResp.ok) { localStorage.removeItem('token'); window.location.href = '/login'; return; }
+        if (!meResp.ok) { localStorage.removeItem('rag_token'); window.location.href = '/login'; return; }
         isAdmin = (await meResp.json()).is_admin;
 
         const resp = await fetch('/api/library', { headers: { Authorization: `Bearer ${token}` } });
