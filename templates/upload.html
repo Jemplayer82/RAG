@@ -231,13 +231,15 @@ document.getElementById('urlForm').addEventListener('submit', async (e) => {
     setProgress('url', 5, 'Submitting URL...');
 
     try {
+        const formData = new FormData();
+        formData.append('type', 'url');
+        formData.append('url', url);
+        formData.append('title', title);
+
         const response = await fetch('/api/sources', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${localStorage.getItem('rag_token')}`
-            },
-            body: JSON.stringify({ type: 'url', url, title })
+            headers: { 'Authorization': `Bearer ${localStorage.getItem('rag_token')}` },
+            body: formData
         });
 
         if (response.status === 401) {
@@ -312,8 +314,9 @@ async function pollJobStatus(prefix, jobId, label) {
                             headers: { 'Authorization': `Bearer ${localStorage.getItem('rag_token')}` }
                         }).catch(() => {});
                     }
-                    showStatus(prefix, 'error', `Error: ${job.error_msg || 'Processing failed'}`);
-                    reject(new Error(job.error_msg));
+                    const errMsg = job.error || 'Processing failed';
+                    showStatus(prefix, 'error', `Error: ${errMsg}`);
+                    reject(new Error(errMsg));
                 }
             } catch (err) {
                 clearInterval(poll); clearInterval(ticker);

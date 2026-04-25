@@ -18,12 +18,11 @@
     </div>
 
     <!-- Statistics -->
-    {% if documents or total_chunks %}
-    <div class="row mb-4">
+    <div class="row mb-4" id="statsRow" style="display: none;">
         <div class="col-md-4">
             <div class="card text-center">
                 <div class="card-body">
-                    <h4>{{ documents|length }}</h4>
+                    <h4 id="statDocs">0</h4>
                     <p class="text-muted mb-0">Documents</p>
                 </div>
             </div>
@@ -31,7 +30,7 @@
         <div class="col-md-4">
             <div class="card text-center">
                 <div class="card-body">
-                    <h4>{{ total_chunks }}</h4>
+                    <h4 id="statChunks">0</h4>
                     <p class="text-muted mb-0">Chunks Indexed</p>
                 </div>
             </div>
@@ -39,24 +38,18 @@
         <div class="col-md-4">
             <div class="card text-center">
                 <div class="card-body">
-                    <h6>{{ last_indexed }}</h6>
+                    <h6 id="statLastIndexed">—</h6>
                     <p class="text-muted mb-0">Last Indexed</p>
                 </div>
             </div>
         </div>
     </div>
-    {% endif %}
 
     <!-- Error -->
-    {% if error %}
-    <div class="alert alert-danger">
-        <strong>Error:</strong> {{ error }}
-    </div>
-    {% endif %}
+    <div class="alert alert-danger" id="errorBanner" style="display: none;"></div>
 
     <!-- Documents Table -->
-    {% if documents %}
-    <div class="table-responsive">
+    <div id="tableWrapper" class="table-responsive" style="display: none;">
         <table class="table table-hover" id="documentsTable">
             <thead class="table-light">
                 <tr>
@@ -69,50 +62,19 @@
                     <th style="cursor: pointer; user-select: none;" data-sort="chunk_count">
                         Chunks <i class="bi bi-arrow-down-up" style="opacity: 0.5;"></i>
                     </th>
-                    <th>Added By</th>
+                    <th>Added</th>
                     <th></th>
                 </tr>
             </thead>
-            <tbody id="tableBody">
-                {% for doc in documents %}
-                <tr {% if doc.added_by == 'user' %}style="background-color: #f0f8ff;"{% endif %}
-                    data-source="{{ doc.source }}"
-                    data-type="{{ doc.doc_type }}"
-                    data-chunks="{{ doc.chunk_count }}"
-                    data-added-by="{{ doc.added_by }}">
-                    <td>
-                        {% if doc.url %}
-                            <a href="{{ doc.url }}" target="_blank" title="Open source">{{ doc.source }}</a>
-                        {% else %}
-                            {{ doc.source }}
-                        {% endif %}
-                    </td>
-                    <td>
-                        <span class="badge {% if doc.doc_type == 'pdf' %}bg-primary{% elif doc.doc_type == 'txt' %}bg-success{% elif doc.doc_type == 'url' %}bg-warning{% else %}bg-secondary{% endif %}">
-                            {{ doc.doc_type }}
-                        </span>
-                    </td>
-                    <td><small>{{ doc.chunk_count }}</small></td>
-                    <td>
-                        <span class="badge bg-primary">User</span>
-                    </td>
-                    <td class="text-end">
-                        {% if doc.url %}
-                        <a href="{{ doc.url }}" target="_blank" class="btn btn-sm btn-outline-primary" title="Open source">
-                            <i class="bi bi-box-arrow-up-right"></i>
-                        </a>
-                        {% endif %}
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
+            <tbody id="tableBody"></tbody>
         </table>
     </div>
-    {% else %}
-    <div class="alert alert-info">
+
+    <div class="alert alert-info" id="emptyState" style="display: none;">
         <strong>No documents indexed yet.</strong> Upload documents or add URLs using the <a href="/upload">Add Sources</a> page.
     </div>
-    {% endif %}
+
+    <p class="text-muted" id="loadingState">Loading documents...</p>
 </div>
 
 <!-- Reindex Progress Modal -->
@@ -140,6 +102,95 @@ const reindexModal = new bootstrap.Modal(document.getElementById('reindexModal')
 
 let sortColumn = 'source';
 let sortDirection = 'asc';
+
+function escapeHtml(s) {
+    return String(s ?? '').replace(/[&<>"']/g, c => (
+        { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+    ));
+}
+
+function renderDocuments(docs) {
+    const tbody = document.getElementById('tableBody');
+    tbody.innerHTML = '';
+
+    for (const doc of docs) {
+        const label = doc.title || doc.url || `Doc ${doc.id}`;
+        const sourceCell = doc.url
+            ? `<a href="${escapeHtml(doc.url)}" target="_blank" title="Open source">${escapeHtml(label)}</a>`
+            : escapeHtml(label);
+
+        const badgeClass = doc.doc_type === 'pdf' ? 'bg-primary'
+                         : doc.doc_type === 'txt' ? 'bg-success'
+                         : doc.doc_type === 'url' ? 'bg-warning'
+                         : 'bg-secondary';
+
+        const added = doc.created_at ? doc.created_at.substring(0, 10) : '—';
+        const linkBtn = doc.url
+            ? `<a href="${escapeHtml(doc.url)}" target="_blank" class="btn btn-sm btn-outline-primary" title="Open source"><i class="bi bi-box-arrow-up-right"></i></a>`
+            : '';
+
+        const tr = document.createElement('tr');
+        tr.dataset.source = label;
+        tr.dataset.type = doc.doc_type || '';
+        tr.dataset.chunks = doc.chunks ?? 0;
+        tr.innerHTML = `
+            <td>${sourceCell}</td>
+            <td><span class="badge ${badgeClass}">${escapeHtml(doc.doc_type || '')}</span></td>
+            <td><small>${doc.chunks ?? 0}</small></td>
+            <td><small class="text-muted">${escapeHtml(added)}</small></td>
+            <td class="text-end">${linkBtn}</td>
+        `;
+        tbody.appendChild(tr);
+    }
+}
+
+async function loadLibrary() {
+    const loading = document.getElementById('loadingState');
+    const empty = document.getElementById('emptyState');
+    const errorBanner = document.getElementById('errorBanner');
+    const tableWrapper = document.getElementById('tableWrapper');
+    const statsRow = document.getElementById('statsRow');
+
+    loading.style.display = 'block';
+    empty.style.display = 'none';
+    errorBanner.style.display = 'none';
+    tableWrapper.style.display = 'none';
+    statsRow.style.display = 'none';
+
+    try {
+        const resp = await fetch('/api/library');
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+        const docs = (data.documents || []).filter(d => (d.chunks ?? 0) > 0);
+
+        loading.style.display = 'none';
+
+        if (docs.length === 0) {
+            empty.style.display = 'block';
+            return;
+        }
+
+        const totalChunks = docs.reduce((sum, d) => sum + (d.chunks || 0), 0);
+        const latest = docs
+            .map(d => d.created_at)
+            .filter(Boolean)
+            .sort()
+            .pop();
+
+        document.getElementById('statDocs').textContent = docs.length;
+        document.getElementById('statChunks').textContent = totalChunks;
+        document.getElementById('statLastIndexed').textContent = latest ? latest.substring(0, 10) : '—';
+        statsRow.style.display = 'flex';
+
+        renderDocuments(docs);
+        sortTable();
+        tableWrapper.style.display = 'block';
+    } catch (err) {
+        loading.style.display = 'none';
+        errorBanner.innerHTML = `<strong>Error:</strong> ${escapeHtml(err.message)}`;
+        errorBanner.style.display = 'block';
+    }
+}
 
 document.querySelectorAll('th[data-sort]').forEach(header => {
     header.addEventListener('click', () => {
@@ -230,5 +281,6 @@ document.getElementById('reindexBtn').addEventListener('click', async () => {
 });
 
 updateHeaderIndicators();
+loadLibrary();
 </script>
 {% endblock %}
