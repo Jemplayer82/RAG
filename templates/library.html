@@ -4,231 +4,160 @@
 
 {% block content %}
 <div class="py-4">
-    <!-- Header -->
     <div class="row mb-4">
         <div class="col-md-8">
             <h2><i class="bi bi-library"></i> Document Library</h2>
             <p class="text-muted">Indexed documents available for querying.</p>
         </div>
-        <div class="col-md-4 text-md-end">
-            <button type="button" class="btn btn-primary" id="reindexBtn">
-                <i class="bi bi-arrow-repeat"></i> Re-index All
-            </button>
-        </div>
     </div>
 
-    <!-- Statistics -->
-    {% if documents or total_chunks %}
     <div class="row mb-4">
-        <div class="col-md-4">
+        <div class="col-md-6">
             <div class="card text-center">
                 <div class="card-body">
-                    <h4>{{ documents|length }}</h4>
+                    <h4 id="statDocs">0</h4>
                     <p class="text-muted mb-0">Documents</p>
                 </div>
             </div>
         </div>
-        <div class="col-md-4">
+        <div class="col-md-6">
             <div class="card text-center">
                 <div class="card-body">
-                    <h4>{{ total_chunks }}</h4>
+                    <h4 id="statChunks">0</h4>
                     <p class="text-muted mb-0">Chunks Indexed</p>
                 </div>
             </div>
         </div>
-        <div class="col-md-4">
-            <div class="card text-center">
-                <div class="card-body">
-                    <h6>{{ last_indexed }}</h6>
-                    <p class="text-muted mb-0">Last Indexed</p>
-                </div>
-            </div>
-        </div>
     </div>
-    {% endif %}
 
-    <!-- Error -->
-    {% if error %}
-    <div class="alert alert-danger">
-        <strong>Error:</strong> {{ error }}
+    <div id="errorBox" class="alert alert-danger d-none"></div>
+
+    <div id="loadingBox" class="text-center py-4">
+        <div class="spinner-border" role="status"><span class="visually-hidden">Loading...</span></div>
     </div>
-    {% endif %}
 
-    <!-- Documents Table -->
-    {% if documents %}
-    <div class="table-responsive">
+    <div id="emptyBox" class="alert alert-info d-none">
+        <strong>No documents indexed yet.</strong> Upload documents or add URLs using the <a href="/upload">Add Sources</a> page.
+    </div>
+
+    <div id="tableWrap" class="table-responsive d-none">
         <table class="table table-hover" id="documentsTable">
             <thead class="table-light">
                 <tr>
-                    <th style="cursor: pointer; user-select: none;" data-sort="source">
-                        Source <i class="bi bi-arrow-down-up" style="opacity: 0.5;"></i>
-                    </th>
-                    <th style="cursor: pointer; user-select: none;" data-sort="doc_type">
-                        Type <i class="bi bi-arrow-down-up" style="opacity: 0.5;"></i>
-                    </th>
-                    <th style="cursor: pointer; user-select: none;" data-sort="chunk_count">
-                        Chunks <i class="bi bi-arrow-down-up" style="opacity: 0.5;"></i>
-                    </th>
-                    <th>Added By</th>
-                    <th></th>
+                    <th style="cursor: pointer; user-select: none;" data-sort="title">Title <i class="bi bi-arrow-down-up" style="opacity: 0.5;"></i></th>
+                    <th style="cursor: pointer; user-select: none;" data-sort="doc_type">Type <i class="bi bi-arrow-down-up" style="opacity: 0.5;"></i></th>
+                    <th style="cursor: pointer; user-select: none;" data-sort="chunks">Chunks <i class="bi bi-arrow-down-up" style="opacity: 0.5;"></i></th>
+                    <th>Added</th>
+                    <th class="text-end">Actions</th>
                 </tr>
             </thead>
-            <tbody id="tableBody">
-                {% for doc in documents %}
-                <tr {% if doc.added_by == 'user' %}style="background-color: #f0f8ff;"{% endif %}
-                    data-source="{{ doc.source }}"
-                    data-type="{{ doc.doc_type }}"
-                    data-chunks="{{ doc.chunk_count }}"
-                    data-added-by="{{ doc.added_by }}">
-                    <td>
-                        {% if doc.url %}
-                            <a href="{{ doc.url }}" target="_blank" title="Open source">{{ doc.source }}</a>
-                        {% else %}
-                            {{ doc.source }}
-                        {% endif %}
-                    </td>
-                    <td>
-                        <span class="badge {% if doc.doc_type == 'pdf' %}bg-primary{% elif doc.doc_type == 'txt' %}bg-success{% elif doc.doc_type == 'url' %}bg-warning{% else %}bg-secondary{% endif %}">
-                            {{ doc.doc_type }}
-                        </span>
-                    </td>
-                    <td><small>{{ doc.chunk_count }}</small></td>
-                    <td>
-                        <span class="badge bg-primary">User</span>
-                    </td>
-                    <td class="text-end">
-                        {% if doc.url %}
-                        <a href="{{ doc.url }}" target="_blank" class="btn btn-sm btn-outline-primary" title="Open source">
-                            <i class="bi bi-box-arrow-up-right"></i>
-                        </a>
-                        {% endif %}
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
+            <tbody id="tableBody"></tbody>
         </table>
     </div>
-    {% else %}
-    <div class="alert alert-info">
-        <strong>No documents indexed yet.</strong> Upload documents or add URLs using the <a href="/upload">Add Sources</a> page.
-    </div>
-    {% endif %}
 </div>
-
-<!-- Reindex Progress Modal -->
-<div class="modal" id="reindexModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false">
-    <div class="modal-dialog modal-dialog-centered">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">Re-indexing</h5>
-            </div>
-            <div class="modal-body text-center">
-                <div class="spinner-border mb-3" role="status">
-                    <span class="visually-hidden">Loading...</span>
-                </div>
-                <p id="reindexStatus">Building index...</p>
-            </div>
-        </div>
-    </div>
-</div>
-
 {% endblock %}
 
 {% block scripts %}
 <script>
-const reindexModal = new bootstrap.Modal(document.getElementById('reindexModal'), { backdrop: 'static', keyboard: false });
+const TYPE_BADGE = { pdf: 'bg-primary', txt: 'bg-success', url: 'bg-warning', doc: 'bg-info', docx: 'bg-info' };
+let documents = [];
+let isAdmin = false;
+let sortColumn = 'created_at';
+let sortDirection = 'desc';
 
-let sortColumn = 'source';
-let sortDirection = 'asc';
+function escapeHtml(s) {
+    return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
 
-document.querySelectorAll('th[data-sort]').forEach(header => {
-    header.addEventListener('click', () => {
-        const column = header.dataset.sort;
+function renderRow(doc) {
+    const badge = TYPE_BADGE[doc.doc_type] || 'bg-secondary';
+    const title = doc.url
+        ? `<a href="${escapeHtml(doc.url)}" target="_blank" rel="noopener">${escapeHtml(doc.title)}</a>`
+        : `<a href="/api/sources/${doc.id}/download" target="_blank" rel="noopener">${escapeHtml(doc.title)}</a>`;
+    const created = new Date(doc.created_at).toLocaleString();
+    const actions = isAdmin
+        ? `<button class="btn btn-sm btn-outline-danger" data-delete="${doc.id}" title="Delete"><i class="bi bi-trash"></i></button>`
+        : '';
+    return `<tr data-title="${escapeHtml(doc.title).toLowerCase()}" data-doc_type="${doc.doc_type}" data-chunks="${doc.chunks}" data-created_at="${doc.created_at}">
+        <td>${title}</td>
+        <td><span class="badge ${badge}">${escapeHtml(doc.doc_type)}</span></td>
+        <td><small>${doc.chunks}</small></td>
+        <td><small class="text-muted">${escapeHtml(created)}</small></td>
+        <td class="text-end">${actions}</td>
+    </tr>`;
+}
 
-        if (sortColumn === column) {
-            sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
-        } else {
-            sortColumn = column;
-            sortDirection = 'asc';
-        }
-
-        sortTable();
-        updateHeaderIndicators();
-    });
-});
-
-function sortTable() {
+function renderTable() {
     const tbody = document.getElementById('tableBody');
-    const rows = Array.from(tbody.querySelectorAll('tr'));
+    document.getElementById('statDocs').textContent = documents.length;
+    document.getElementById('statChunks').textContent = documents.reduce((s, d) => s + (d.chunks || 0), 0);
 
-    rows.sort((a, b) => {
-        let aVal = a.dataset[sortColumn] || '';
-        let bVal = b.dataset[sortColumn] || '';
-
-        if (sortColumn === 'chunk_count') {
-            aVal = parseInt(aVal) || 0;
-            bVal = parseInt(bVal) || 0;
-        } else {
-            aVal = String(aVal).toLowerCase();
-            bVal = String(bVal).toLowerCase();
-        }
-
-        let comparison = 0;
-        if (aVal < bVal) comparison = -1;
-        if (aVal > bVal) comparison = 1;
-
-        return sortDirection === 'asc' ? comparison : -comparison;
-    });
-
-    rows.forEach(row => tbody.appendChild(row));
-}
-
-function updateHeaderIndicators() {
-    document.querySelectorAll('th[data-sort]').forEach(header => {
-        const icon = header.querySelector('i');
-        if (header.dataset.sort === sortColumn) {
-            icon.style.opacity = '1';
-            icon.className = sortDirection === 'asc' ? 'bi bi-arrow-up' : 'bi bi-arrow-down';
-        } else {
-            icon.style.opacity = '0.3';
-            icon.className = 'bi bi-arrow-down-up';
-        }
-    });
-}
-
-document.getElementById('reindexBtn').addEventListener('click', async () => {
-    document.getElementById('reindexBtn').disabled = true;
-    reindexModal.show();
-
-    try {
-        const startResp = await fetch('/reindex', { method: 'POST' });
-        if (!startResp.ok) throw new Error('Failed to start reindex');
-
-        let done = false;
-        while (!done) {
-            const progressResp = await fetch('/reindex-progress');
-            const progress = await progressResp.json();
-
-            document.getElementById('reindexStatus').textContent = progress.message || 'Processing...';
-
-            if (progress.status === 'complete' || progress.status === 'error') {
-                done = true;
-                setTimeout(() => {
-                    reindexModal.hide();
-                    alert(progress.message);
-                    location.reload();
-                }, 1000);
-            } else {
-                await new Promise(r => setTimeout(r, 1000));
-            }
-        }
-    } catch (error) {
-        reindexModal.hide();
-        alert(`Error: ${error.message}`);
-        document.getElementById('reindexBtn').disabled = false;
+    if (documents.length === 0) {
+        document.getElementById('emptyBox').classList.remove('d-none');
+        document.getElementById('tableWrap').classList.add('d-none');
+        tbody.innerHTML = '';
+        return;
     }
+    document.getElementById('emptyBox').classList.add('d-none');
+    document.getElementById('tableWrap').classList.remove('d-none');
+
+    const sorted = [...documents].sort((a, b) => {
+        let av = a[sortColumn], bv = b[sortColumn];
+        if (sortColumn === 'chunks') { av = av || 0; bv = bv || 0; }
+        else { av = String(av ?? '').toLowerCase(); bv = String(bv ?? '').toLowerCase(); }
+        const cmp = av < bv ? -1 : av > bv ? 1 : 0;
+        return sortDirection === 'asc' ? cmp : -cmp;
+    });
+    tbody.innerHTML = sorted.map(renderRow).join('');
+
+    tbody.querySelectorAll('button[data-delete]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const id = btn.dataset.delete;
+            if (!confirm('Delete this document?')) return;
+            const token = localStorage.getItem('token');
+            const resp = await fetch(`/api/sources/${id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
+            if (!resp.ok) {
+                const err = await resp.text();
+                alert(`Delete failed: ${err}`);
+                return;
+            }
+            documents = documents.filter(d => d.id != id);
+            renderTable();
+        });
+    });
+}
+
+async function loadLibrary() {
+    const token = localStorage.getItem('token');
+    if (!token) { window.location.href = '/login'; return; }
+    try {
+        const meResp = await fetch('/api/auth/me', { headers: { Authorization: `Bearer ${token}` } });
+        if (!meResp.ok) { localStorage.removeItem('token'); window.location.href = '/login'; return; }
+        isAdmin = (await meResp.json()).is_admin;
+
+        const resp = await fetch('/api/library', { headers: { Authorization: `Bearer ${token}` } });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+        documents = data.documents || [];
+    } catch (e) {
+        const box = document.getElementById('errorBox');
+        box.textContent = `Failed to load library: ${e.message}`;
+        box.classList.remove('d-none');
+    } finally {
+        document.getElementById('loadingBox').classList.add('d-none');
+        renderTable();
+    }
+}
+
+document.querySelectorAll('th[data-sort]').forEach(h => {
+    h.addEventListener('click', () => {
+        const col = h.dataset.sort;
+        if (sortColumn === col) sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
+        else { sortColumn = col; sortDirection = 'asc'; }
+        renderTable();
+    });
 });
 
-updateHeaderIndicators();
+loadLibrary();
 </script>
 {% endblock %}
