@@ -10,16 +10,16 @@
             <div class="card-body">
                 <form id="registerForm">
                     <div class="mb-3">
-                        <label class="form-label">Username</label>
-                        <input type="text" class="form-control" id="username" required autofocus>
+                        <label for="username" class="form-label">Username</label>
+                        <input type="text" class="form-control" id="username" name="username" autocomplete="username" required autofocus>
                     </div>
                     <div class="mb-3">
-                        <label class="form-label">Email</label>
-                        <input type="email" class="form-control" id="email" required>
+                        <label for="email" class="form-label">Email</label>
+                        <input type="email" class="form-control" id="email" name="email" autocomplete="email" required>
                     </div>
                     <div class="mb-3">
-                        <label class="form-label">Password</label>
-                        <input type="password" class="form-control" id="password" required minlength="8">
+                        <label for="password" class="form-label">Password</label>
+                        <input type="password" class="form-control" id="password" name="password" autocomplete="new-password" required minlength="8">
                     </div>
                     <button type="submit" class="btn btn-success w-100">Create Account</button>
                 </form>
