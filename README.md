@@ -6,7 +6,7 @@ A self-hosted web app that lets multiple users upload documents (PDF, TXT, or UR
 
 - **Upload** PDFs, text files, or web URLs into a personal document library
 - **Chat** with an AI assistant that answers questions using only your documents, with source citations
-- **Multi-user** — each account's documents are fully isolated
+- **Shared library** — admin uploads documents into a single collection that all authenticated users can query. Multi-user means multiple authenticated users can chat against the shared library; only the admin can add or remove sources
 - **Flexible LLM** — use a local Ollama model or a cloud provider (OpenAI, Anthropic)
 
 ## Stack
