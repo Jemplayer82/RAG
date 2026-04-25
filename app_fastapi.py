@@ -18,10 +18,10 @@ Routes:
   POST   /api/auth/login        — Get JWT token
   GET    /api/auth/me           — Current user info
 
-  POST   /api/chat              — Query RAG (auth required)
-  GET    /api/library           — List user's documents (auth required)
-  POST   /api/sources           — Add document / URL (auth required)
-  DELETE /api/sources/{id}      — Remove document (auth required)
+  POST   /api/chat              — Authenticated query against the shared library
+  GET    /api/library           — List shared admin-curated documents (auth required)
+  POST   /api/sources           — Add document / URL (admin only)
+  DELETE /api/sources/{id}      — Remove document (admin only)
   GET    /api/sources/jobs/{id} — Poll ingestion job status (auth required)
 
   GET    /api/settings          — User preferences (auth required)
@@ -323,8 +323,8 @@ async def get_me(user: User = Depends(get_current_user)):
 # ============================================================================
 
 @app.post("/api/chat", response_model=ChatResponse)
-async def chat(req: ChatRequest, db: Session = Depends(get_db)):
-    """Public chat endpoint — queries admin's document collection."""
+async def chat(req: ChatRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Authenticated chat — queries the shared admin-curated document collection."""
     if not req.question.strip():
         raise HTTPException(status_code=400, detail="Question cannot be empty")
     admin_id = get_admin_user_id(db)
@@ -347,8 +347,8 @@ async def chat(req: ChatRequest, db: Session = Depends(get_db)):
 # ============================================================================
 
 @app.get("/api/library")
-async def get_library(db: Session = Depends(get_db)):
-    """Public library — lists admin's indexed documents."""
+async def get_library(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Authenticated library — lists the shared admin-curated document collection."""
     admin_id = get_admin_user_id(db)
     docs = db.query(Document).filter(Document.user_id == admin_id).order_by(Document.created_at.desc()).all()
     return {
