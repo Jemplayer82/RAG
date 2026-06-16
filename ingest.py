@@ -17,6 +17,9 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 from datetime import datetime
 import logging
+import ipaddress
+import socket
+from urllib.parse import urlparse, urljoin
 
 import requests
 from bs4 import BeautifulSoup
@@ -38,6 +41,80 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 CUSTOM_SOURCES_FILE = RAW_DIR / "custom_sources.json"
+
+
+# ============================================================================
+# SSRF PROTECTION
+# ============================================================================
+# Every server-side fetch of a user/admin-supplied URL (single URL ingest,
+# crawler, robots.txt) goes through these guards so the app can't be tricked
+# into reaching internal services (qdrant/postgres/redis/ollama), cloud
+# metadata (169.254.169.254), loopback, or other private ranges.
+
+_BLOCKED_HOSTNAMES = {"localhost", "qdrant", "postgres", "redis", "ollama"}
+
+
+def _ip_is_blocked(ip_str: str) -> bool:
+    try:
+        ip = ipaddress.ip_address(ip_str)
+    except ValueError:
+        return True  # unparseable → treat as unsafe
+    # Unwrap IPv4-mapped IPv6 (e.g. ::ffff:127.0.0.1) to catch bypasses.
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        ip = ip.ipv4_mapped
+    return (
+        ip.is_private or ip.is_loopback or ip.is_link_local
+        or ip.is_reserved or ip.is_multicast or ip.is_unspecified
+    )
+
+
+def _assert_url_allowed(url: str) -> None:
+    """Raise ValueError if `url` is unsafe for the server to fetch (SSRF guard)."""
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(f"Blocked URL scheme: {parsed.scheme or '(none)'}")
+    hostname = (parsed.hostname or "").strip()
+    if not hostname:
+        raise ValueError("URL has no hostname")
+    if hostname.lower() in _BLOCKED_HOSTNAMES:
+        raise ValueError(f"Blocked internal host: {hostname}")
+
+    # Either the host is an IP literal (check it), or resolve every address.
+    try:
+        ipaddress.ip_address(hostname)
+        ips = [hostname]
+    except ValueError:
+        try:
+            addrs = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
+        except socket.gaierror as e:
+            raise ValueError(f"Cannot resolve host {hostname}: {e}")
+        ips = [res[4][0] for res in addrs]
+
+    for ip_str in ips:
+        if _ip_is_blocked(ip_str):
+            raise ValueError(f"Blocked address {ip_str} for host {hostname}")
+
+
+def _safe_get(url: str, *, max_redirects: int = 5, **kwargs) -> "requests.Response":
+    """
+    requests.get with SSRF protection on every hop. Redirects are followed
+    manually so each intermediate URL is validated before it's fetched
+    (a public URL that 302s to http://qdrant:6333 is blocked).
+    """
+    kwargs.setdefault("timeout", 30)
+    kwargs["allow_redirects"] = False
+    current = url
+    for _ in range(max_redirects + 1):
+        _assert_url_allowed(current)
+        resp = requests.get(current, **kwargs)
+        if resp.status_code in (301, 302, 303, 307, 308):
+            location = resp.headers.get("Location")
+            if not location:
+                return resp
+            current = urljoin(current, location)
+            continue
+        return resp
+    raise ValueError(f"Too many redirects fetching {url}")
 
 
 # ============================================================================
@@ -260,8 +337,8 @@ def ingest_doc(file_path: str, title: str, url_hint: str = "") -> Tuple[List[Dic
 # ============================================================================
 
 def _extract_text_requests(url: str) -> str:
-    """Fallback scraper using requests + BeautifulSoup."""
-    response = requests.get(url, timeout=30, headers={"User-Agent": "Mozilla/5.0"})
+    """Fallback scraper using requests + BeautifulSoup (SSRF-guarded)."""
+    response = _safe_get(url, headers={"User-Agent": "Mozilla/5.0"})
     response.raise_for_status()
     soup = BeautifulSoup(response.content, "html.parser")
     for tag in soup(["script", "style", "nav", "footer", "header", "aside"]):
@@ -271,6 +348,7 @@ def _extract_text_requests(url: str) -> str:
 
 def _extract_text_scrapling(url: str) -> str:
     """Primary scraper using Scrapling — handles JS-rendered pages and anti-bot."""
+    _assert_url_allowed(url)
     from scrapling import Fetcher, PlayWrightFetcher
     try:
         # Try fast fetch first (handles most sites + basic anti-bot)
@@ -304,6 +382,7 @@ def ingest_url(url: str, title: str) -> Tuple[List[Dict], int]:
     Raises:
         ValueError: If insufficient text is extracted
     """
+    _assert_url_allowed(url)  # SSRF guard (fail fast with a clear message)
     text = ""
 
     # Try Scrapling first
@@ -540,7 +619,7 @@ def _is_relevant(link: str, seed: str, same_domain_only: bool) -> bool:
 
 
 def _fetch_page(url: str):
-    response = requests.get(url, timeout=20, headers={"User-Agent": "Mozilla/5.0 (RAGCrawler)"})
+    response = _safe_get(url, timeout=20, headers={"User-Agent": "Mozilla/5.0 (RAGCrawler)"})
     response.raise_for_status()
     ct = (response.headers.get("Content-Type") or "").lower()
     if "html" not in ct and "xml" not in ct and "text" not in ct:
@@ -571,7 +650,7 @@ def ingest_crawl(
         parsed = urlparse(seed_url)
         robots_url = f"{parsed.scheme}://{parsed.netloc}/robots.txt"
         try:
-            r = requests.get(robots_url, timeout=10, headers={"User-Agent": "RAGCrawler"})
+            r = _safe_get(robots_url, timeout=10, headers={"User-Agent": "RAGCrawler"})
             if r.status_code == 200:
                 rp = Protego.parse(r.text)
         except Exception as e:
