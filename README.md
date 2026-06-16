@@ -55,7 +55,7 @@ docker compose up -d
 curl http://localhost:8000/api/health
 ```
 
-Browse to **http://localhost:8000** and register an account. The first registered user becomes admin automatically.
+Browse to **http://localhost:8000** and register an account. The first registered user becomes admin automatically — or set `ADMIN_USERNAME` to pin which username gets admin (recommended for any internet-exposed deploy, so a stranger can't claim admin by registering first).
 
 > **Note:** A cloned repo auto-loads `docker-compose.override.yml`, which builds the image locally. To use the pre-built published image instead, run `docker compose -f docker-compose.yml up -d`.
 
@@ -87,6 +87,7 @@ Make sure the host directories exist first (see Prerequisites), then:
 | `POSTGRES_PASSWORD` | Yes | PostgreSQL password |
 | `JWT_SECRET` | No | Auto-generated on first boot and persisted to `/storage/rag/uploads/.secrets.env` |
 | `ENCRYPTION_KEY` | No | Auto-generated on first boot (same persistence as above) |
+| `ADMIN_USERNAME` | No | If set, only this username can become admin (and only while no admin exists). Recommended for exposed deploys to prevent admin land-grab. |
 | `RAG_PORT` | No | Host port for the web UI (default: `8000`) |
 | `DATA_ROOT` | No | Host base directory for data (default: `/storage/rag`) |
 | `LLM_PROVIDER` | No | `ollama` (default), `openai`, `anthropic`, or `generic` |
