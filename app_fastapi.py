@@ -413,15 +413,37 @@ async def add_source(
     file_path = ""
     source_url = url or ""
 
-    # Save uploaded file to disk
+    # Save uploaded file to disk (size-capped, safe filename, type from extension)
     if doc_type in ("pdf", "txt", "doc", "docx") and file:
-        safe_name = secure_filename(file.filename)
+        MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB
+
+        # The real file extension is authoritative over the client-sent type,
+        # so the correct ingester runs even if `type` was spoofed.
+        fname = file.filename or ""
+        ext = fname.rsplit(".", 1)[-1].lower() if "." in fname else ""
+        if ext in ("pdf", "txt", "doc", "docx"):
+            doc_type = ext
+
+        safe_name = secure_filename(fname) or f"upload.{doc_type}"
         dest = Path(CACHE_ROOT) / "uploads" / f"{user.id}_{safe_name}"
         dest.parent.mkdir(parents=True, exist_ok=True)
 
+        # Stream to disk in bounded chunks; never read the whole file into RAM.
+        total = 0
+        too_large = False
         async with aiofiles.open(dest, "wb") as f:
-            content = await file.read()
-            await f.write(content)
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > MAX_UPLOAD_BYTES:
+                    too_large = True
+                    break
+                await f.write(chunk)
+        if too_large:
+            dest.unlink(missing_ok=True)  # handle is closed now (Windows-safe)
+            raise HTTPException(status_code=413, detail="File too large (max 50 MB)")
 
         file_path = str(dest)
 
