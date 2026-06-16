@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-06-16)
 
 ## Current Position
 
-Phase: 3 of 4 (User Simulation & Break-Testing)
+Phase: 4 of 4 (Security Audit)
 Plan: 0 of TBD
-Status: Phases 1–2 complete + review gate findings fixed; rebuilt + healthy; ready for Phase 3
-Last activity: 2026-06-16 — Phase 2 quality fixes + Phase 1 review fixes done; lifespan migration validated; native GPU Ollama reachable from container
+Status: Phases 1–3 complete; full UAT passed against deployed fixed code; ready for Phase 4
+Last activity: 2026-06-16 — Phase 3 user-sim passed; caught+fixed the pull_policy:always deploy bug (local builds were never deploying); re-ran full UAT clean
 
-Progress: [█████░░░░░] 50%
+Progress: [████████░░] 75%
 
 ## Performance Metrics
 
