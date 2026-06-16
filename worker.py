@@ -47,7 +47,7 @@ def reap_stale_jobs():
     try:
         from models import IngestionJob, get_session_local
         from rq.job import Job
-        from rq.exceptions import NoSuchJobException
+        from rq.exceptions import NoSuchJobError
 
         SessionLocal = get_session_local()
         db = SessionLocal()
@@ -68,7 +68,7 @@ def reap_stale_jobs():
                         # Still live, or already succeeded — leave for the worker/poller.
                         if rq_status in ("queued", "started", "deferred", "scheduled", "finished"):
                             continue
-                    except NoSuchJobException:
+                    except NoSuchJobError:
                         pass  # gone from Redis → truly stale
                 # No rq_job_id, missing from Redis, or failed/stopped/canceled → reap.
                 job.status = "error"
