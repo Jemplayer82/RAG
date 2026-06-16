@@ -15,7 +15,8 @@ RUN apt-get update && apt-get install -y \
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt && \
-    python -m playwright install chromium --with-deps 2>/dev/null || true
+    (python -m playwright install chromium --with-deps \
+     || echo "WARNING: playwright/chromium install failed; JS scraping will fall back to requests")
 
 COPY . .
 
@@ -27,7 +28,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
   CMD curl -f http://localhost:8000/api/health || exit 1
 
 CMD ["gunicorn", "app_fastapi:app", \
-     "--workers", "4", \
+     "--workers", "2", \
      "--worker-class", "uvicorn.workers.UvicornWorker", \
      "--bind", "0.0.0.0:8000", \
      "--timeout", "120", \

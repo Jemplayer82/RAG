@@ -12,6 +12,11 @@
 services:
   rag:
     build: .
+    # Without this, the base file's `pull_policy: always` re-pulls the GHCR
+    # image on every `up` and silently overwrites the local build — so code
+    # changes never deploy. `build` forces use of the locally-built image.
+    pull_policy: build
 
   rag-worker:
     build: .
+    pull_policy: build

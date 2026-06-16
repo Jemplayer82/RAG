@@ -30,8 +30,10 @@ Routes:
 """
 
 import asyncio
+import json
 import logging
 import os
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
@@ -220,17 +222,32 @@ class ChatResponse(BaseModel):
 # FASTAPI APP
 # ============================================================================
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info("RAG v2.0 FastAPI server starting...")
+    logger.info(f"Ollama: {OLLAMA_BASE_URL}")
+    logger.info(f"Cache: {CACHE_ROOT}")
+    init_db()
+    logger.info("Database tables initialized")
+    yield
+    logger.info("RAG v2.0 FastAPI server shutting down...")
+
+
 app = FastAPI(
     title="RAG Assistant",
     version="2.0.0",
     docs_url="/api/docs" if DEBUG else None,
     openapi_url="/api/openapi.json" if DEBUG else None,
+    lifespan=lifespan,
 )
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    # Auth is a Bearer token in localStorage (no cookies), so credentials are
+    # not needed. A wildcard origin with credentials is invalid per the CORS
+    # spec and makes Starlette reflect any Origin — keep credentials off.
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -286,17 +303,35 @@ async def register(user_data: UserCreate, db: Session = Depends(get_db)):
     if existing:
         raise HTTPException(status_code=400, detail="Username or email already registered")
 
-    is_first_user = db.query(User).count() == 0
+    # Admin assignment, hardened against the "land-grab" (a stranger registering
+    # first on a briefly-exposed deploy). A new user becomes admin ONLY if no
+    # admin exists yet AND either ADMIN_USERNAME matches them, or ADMIN_USERNAME
+    # is unset and they are the very first user. Once an admin exists, no
+    # registration can ever mint another admin.
+    admin_username = os.getenv("ADMIN_USERNAME", "").strip()
+    admin_exists = db.query(User).filter(User.is_admin == True).count() > 0
+    if admin_exists:
+        is_admin = False
+    elif admin_username:
+        is_admin = (user_data.username == admin_username)
+    else:
+        is_admin = (db.query(User).count() == 0)
+        if is_admin:
+            logger.warning(
+                "[AUTH] Granting admin to first registrant without ADMIN_USERNAME set — "
+                "set ADMIN_USERNAME to close the first-registration race window."
+            )
+
     user = User(
         username=user_data.username,
         email=user_data.email,
         hashed_password=hash_password(user_data.password),
-        is_admin=is_first_user,
+        is_admin=is_admin,
     )
     db.add(user)
     db.commit()
     db.refresh(user)
-    logger.info(f"[AUTH] Registered: {user.username}{' (admin)' if is_first_user else ''}")
+    logger.info(f"[AUTH] Registered: {user.username}{' (admin)' if is_admin else ''}")
     return user
 
 
@@ -339,7 +374,8 @@ async def chat(req: ChatRequest, user: User = Depends(get_current_user), db: Ses
         logger.error(f"[CHAT] Error: {e}")
         if "connect" in str(e).lower():
             raise HTTPException(status_code=503, detail="Cannot connect to LLM. Please check provider settings.")
-        raise HTTPException(status_code=500, detail=str(e))
+        # Don't leak internal exception detail to clients; it's logged above.
+        raise HTTPException(status_code=500, detail="Failed to process your question. Please try again.")
 
 
 # ============================================================================
@@ -397,15 +433,37 @@ async def add_source(
     file_path = ""
     source_url = url or ""
 
-    # Save uploaded file to disk
+    # Save uploaded file to disk (size-capped, safe filename, type from extension)
     if doc_type in ("pdf", "txt", "doc", "docx") and file:
-        safe_name = secure_filename(file.filename)
+        MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB
+
+        # The real file extension is authoritative over the client-sent type,
+        # so the correct ingester runs even if `type` was spoofed.
+        fname = file.filename or ""
+        ext = fname.rsplit(".", 1)[-1].lower() if "." in fname else ""
+        if ext in ("pdf", "txt", "doc", "docx"):
+            doc_type = ext
+
+        safe_name = secure_filename(fname) or f"upload.{doc_type}"
         dest = Path(CACHE_ROOT) / "uploads" / f"{user.id}_{safe_name}"
         dest.parent.mkdir(parents=True, exist_ok=True)
 
+        # Stream to disk in bounded chunks; never read the whole file into RAM.
+        total = 0
+        too_large = False
         async with aiofiles.open(dest, "wb") as f:
-            content = await file.read()
-            await f.write(content)
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > MAX_UPLOAD_BYTES:
+                    too_large = True
+                    break
+                await f.write(chunk)
+        if too_large:
+            dest.unlink(missing_ok=True)  # handle is closed now (Windows-safe)
+            raise HTTPException(status_code=413, detail="File too large (max 50 MB)")
 
         file_path = str(dest)
 
@@ -413,8 +471,6 @@ async def add_source(
         source_url = url.strip()
     else:
         raise HTTPException(status_code=400, detail="Invalid source type or missing file/URL")
-
-    doc_id_prefix = f"{doc_type}_{title.lower().replace(' ', '_')}"
 
     # Create Document record (chunks=0 until job completes)
     doc = Document(
@@ -436,6 +492,16 @@ async def add_source(
     db.commit()
     db.refresh(job_record)
 
+    # Stable, unique document identifier for Qdrant points, derived from the
+    # immutable primary key — used for BOTH upsert and delete so two docs with
+    # the same title/type never collide and deletes are exact. Capture plain
+    # ids now so the inline-fallback task never touches the request-scoped
+    # session/ORM objects (get_db() closes them once this response returns).
+    doc_id_prefix = f"doc_{doc.id}"
+    document_id = doc.id
+    job_record_id = job_record.id
+    owner_id = user.id
+
     # Enqueue background job in Redis RQ (falls back to inline on Windows/no Redis)
     use_inline = False
     try:
@@ -446,7 +512,9 @@ async def add_source(
                 "file_path": file_path,
                 "title": title,
                 "doc_type": doc_type,
-                "user_id": user.id,
+                "user_id": owner_id,
+                "document_id": document_id,
+                "job_id": job_record_id,
                 "url": source_url,
                 "doc_id_prefix": doc_id_prefix,
                 "crawl": crawl,
@@ -466,26 +534,26 @@ async def add_source(
         use_inline = True
 
     if use_inline:
-        # Run in background task so polling still works
+        # Mark this as an inline job so a worker restart's reaper can tell it
+        # apart from a lost RQ job (a NULL rq_job_id would otherwise be reaped).
+        job_record.rq_job_id = "inline"
+        db.commit()
+        # Run in a background task. run_ingestion_job opens its OWN DB session
+        # and writes Document.chunks + job status/error itself, so we hand it
+        # only plain ids — never the request-scoped session or ORM objects,
+        # which get_db() has already closed by the time this task runs.
         async def run_inline():
-            job_record.status = "running"
-            db.commit()
             try:
-                count = await asyncio.to_thread(
+                await asyncio.to_thread(
                     run_ingestion_job,
                     file_path=file_path, title=title, doc_type=doc_type,
-                    user_id=user.id, url=source_url, doc_id_prefix=doc_id_prefix,
-                    crawl=crawl, max_depth=max_depth, max_pages=max_pages, same_domain_only=same_domain_only, respect_robots=respect_robots,
+                    user_id=owner_id, document_id=document_id, job_id=job_record_id,
+                    url=source_url, doc_id_prefix=doc_id_prefix,
+                    crawl=crawl, max_depth=max_depth, max_pages=max_pages,
+                    same_domain_only=same_domain_only, respect_robots=respect_robots,
                 )
-                doc.chunks = count
-                job_record.status = "complete"
-                job_record.completed_at = datetime.utcnow()
-                db.commit()
-                logger.info(f"[SOURCES] Inline ingestion complete: {title} → {count} chunks")
+                logger.info(f"[SOURCES] Inline ingestion complete: {title}")
             except Exception as ingest_err:
-                job_record.status = "error"
-                job_record.error_msg = str(ingest_err)
-                db.commit()
                 logger.error(f"[SOURCES] Inline ingestion failed: {ingest_err}")
 
         asyncio.create_task(run_inline())
@@ -562,6 +630,8 @@ async def download_source(
     if doc.doc_type == "url":
         if not doc.url:
             raise HTTPException(status_code=400, detail="URL document has no URL")
+        if not (doc.url.startswith("http://") or doc.url.startswith("https://")):
+            raise HTTPException(status_code=400, detail="Refusing to redirect to a non-http(s) URL")
         return RedirectResponse(url=doc.url, status_code=302)
 
     if not doc.cached_path:
@@ -588,8 +658,9 @@ async def delete_source(
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
-    # Remove from Qdrant
-    doc_id_prefix = f"{doc.doc_type}_{doc.title.lower().replace(' ', '_')}"
+    # Remove from Qdrant using the same stable, unique prefix used at ingest
+    # time (doc_{id}) — never reconstruct from the title (collisions/orphans).
+    doc_id_prefix = f"doc_{doc.id}"
     try:
         qm = QdrantManager(user_id=user.id)
         await asyncio.to_thread(qm.delete_document, doc_id_prefix)
@@ -624,8 +695,8 @@ async def update_settings(
     db: Session = Depends(get_db)
 ):
     """Update user profile settings."""
-    if "email" in data:
-        user.email = data["email"].strip()
+    if "email" in data and data["email"]:
+        user.email = str(data["email"]).strip()
         db.commit()
     return {"status": "updated"}
 
@@ -794,13 +865,13 @@ async def pull_ollama_model(
                 ) as resp:
                     if resp.status_code >= 400:
                         body = await resp.aread()
-                        yield f'{{"error": "Ollama {resp.status_code}: {body.decode(errors="ignore")[:200]}"}}\n'
+                        yield json.dumps({"error": f"Ollama {resp.status_code}: {body.decode(errors='ignore')[:200]}"}) + "\n"
                         return
                     async for line in resp.aiter_lines():
                         if line:
                             yield line + "\n"
             except httpx.RequestError as e:
-                yield f'{{"error": "Cannot reach Ollama at {base_url}: {e}"}}\n'
+                yield json.dumps({"error": f"Cannot reach Ollama at {base_url}: {e}"}) + "\n"
 
     return StreamingResponse(stream_pull(), media_type="application/x-ndjson")
 
@@ -900,20 +971,6 @@ async def server_error_handler(request: Request, exc):
 # ============================================================================
 # STARTUP / SHUTDOWN
 # ============================================================================
-
-@app.on_event("startup")
-async def startup():
-    logger.info("RAG v2.0 FastAPI server starting...")
-    logger.info(f"Ollama: {OLLAMA_BASE_URL}")
-    logger.info(f"Cache: {CACHE_ROOT}")
-    init_db()
-    logger.info("Database tables initialized")
-
-
-@app.on_event("shutdown")
-async def shutdown():
-    logger.info("RAG v2.0 FastAPI server shutting down...")
-
 
 # ============================================================================
 # RUN (development only — production uses Gunicorn)

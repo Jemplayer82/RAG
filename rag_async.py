@@ -79,18 +79,24 @@ def _retrieve_sources_sync(question: str, user_id: int, k: int = TOP_K) -> List[
         logger.warning(f"[RAG] No results for user {user_id}")
         return []
 
-    # BM25 re-ranking
+    # BM25 re-ranking, fused with the semantic score.
     if len(raw_results) > 1:
         corpus_tokens = [r["text"].lower().split() for r in raw_results]
         bm25 = BM25Okapi(corpus_tokens)
         question_tokens = question.lower().split()
-        bm25_scores = bm25.get_scores(question_tokens)
+        bm25_scores = [float(s) for s in bm25.get_scores(question_tokens)]
+
+        # Min-max normalize BM25 to [0,1] so its unbounded raw scale can't swamp
+        # the cosine score (already ~[0,1]) in the weighted fusion.
+        bm_min, bm_max = min(bm25_scores), max(bm25_scores)
+        bm_range = bm_max - bm_min
 
         combined = []
         for i, result in enumerate(raw_results):
             semantic_score = result.get("score", 0.0)
-            bm25_score = float(bm25_scores[i]) if i < len(bm25_scores) else 0.0
-            combined_score = 0.6 * semantic_score + 0.4 * bm25_score
+            raw_bm = bm25_scores[i] if i < len(bm25_scores) else 0.0
+            bm25_norm = (raw_bm - bm_min) / bm_range if bm_range > 0 else 0.0
+            combined_score = 0.6 * semantic_score + 0.4 * bm25_norm
             combined.append((i, combined_score))
 
         combined.sort(key=lambda x: x[1], reverse=True)
@@ -171,7 +177,7 @@ async def query_async(
     source_citations = []
     for i, source in enumerate(sources, start=1):
         meta = source["metadata"]
-        citation = meta.get("source") or meta.get("case_name") or "Unknown source"
+        citation = meta.get("source") or "Unknown source"
         url = meta.get("url", "")
 
         if url:
@@ -196,13 +202,26 @@ async def query_async(
             "page_url": page_url,
             "anchor_url": page_url_with_anchor,
             "excerpt": excerpt_raw,
-            "doc_id": meta.get("doc_id", None),
         })
 
     prompt = RAG_PROMPT_TEMPLATE.format(
         sources_text=sources_text,
         question=question
     )
+
+    # Prepend recent conversation turns (if any) so follow-up questions have
+    # context. The answer must still be grounded in the SOURCES above.
+    if chat_history:
+        recent = chat_history[-6:]
+        convo = "\n".join(
+            f"{str(m.get('role', 'user')).upper()}: {m.get('content', '')}"
+            for m in recent if isinstance(m, dict) and m.get("content")
+        )
+        if convo:
+            prompt = (
+                "Recent conversation (context only — answer the QUESTION using the SOURCES):\n"
+                f"{convo}\n\n{prompt}"
+            )
 
     # Call LLM via configured provider
     answer = await _call_llm_async(prompt)

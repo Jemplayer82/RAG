@@ -52,7 +52,7 @@ If Redis is unavailable, the job falls back to `asyncio.create_task()` running i
 
 ### Key Design Decisions
 
-**Admin-centric model:** Only the first registered user is admin. `POST /api/sources` requires admin. `POST /api/chat` and `GET /api/library` are public but query the admin's Qdrant collection (`user_{admin_id}`), not the caller's. The per-user isolation in `QdrantManager` exists but is only exercised through the admin account in practice.
+**Admin-centric model:** The first registered user becomes admin — unless `ADMIN_USERNAME` is set, in which case only that username can claim admin (and never once an admin already exists; this closes the "land-grab" window). `POST /api/sources` requires admin. `POST /api/chat` and `GET /api/library` require **any authenticated user** (they are NOT public — the JWT is validated by `get_current_user`) but query the admin's Qdrant collection (`user_{admin_id}`), not the caller's. The per-user isolation in `QdrantManager` exists but is only exercised through the admin account in practice.
 
 **LLM provider routing (`llm_provider.py`):** Active config lives in the `llm_provider_configs` table (single row). Admin sets it at `/admin/llm-settings`. Falls back to env vars (`LLM_PROVIDER`, `LLM_MODEL`, etc.) if no DB row exists. Supported providers: `ollama`, `openai`, `anthropic`, `generic` (OpenAI-compatible).
 

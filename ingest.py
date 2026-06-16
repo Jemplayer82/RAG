@@ -17,6 +17,9 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 from datetime import datetime
 import logging
+import ipaddress
+import socket
+from urllib.parse import urlparse, urljoin
 
 import requests
 from bs4 import BeautifulSoup
@@ -38,6 +41,80 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 CUSTOM_SOURCES_FILE = RAW_DIR / "custom_sources.json"
+
+
+# ============================================================================
+# SSRF PROTECTION
+# ============================================================================
+# Every server-side fetch of a user/admin-supplied URL (single URL ingest,
+# crawler, robots.txt) goes through these guards so the app can't be tricked
+# into reaching internal services (qdrant/postgres/redis/ollama), cloud
+# metadata (169.254.169.254), loopback, or other private ranges.
+
+_BLOCKED_HOSTNAMES = {"localhost", "qdrant", "postgres", "redis", "ollama"}
+
+
+def _ip_is_blocked(ip_str: str) -> bool:
+    try:
+        ip = ipaddress.ip_address(ip_str)
+    except ValueError:
+        return True  # unparseable → treat as unsafe
+    # Unwrap IPv4-mapped IPv6 (e.g. ::ffff:127.0.0.1) to catch bypasses.
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        ip = ip.ipv4_mapped
+    return (
+        ip.is_private or ip.is_loopback or ip.is_link_local
+        or ip.is_reserved or ip.is_multicast or ip.is_unspecified
+    )
+
+
+def _assert_url_allowed(url: str) -> None:
+    """Raise ValueError if `url` is unsafe for the server to fetch (SSRF guard)."""
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(f"Blocked URL scheme: {parsed.scheme or '(none)'}")
+    hostname = (parsed.hostname or "").strip()
+    if not hostname:
+        raise ValueError("URL has no hostname")
+    if hostname.lower() in _BLOCKED_HOSTNAMES:
+        raise ValueError(f"Blocked internal host: {hostname}")
+
+    # Either the host is an IP literal (check it), or resolve every address.
+    try:
+        ipaddress.ip_address(hostname)
+        ips = [hostname]
+    except ValueError:
+        try:
+            addrs = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
+        except socket.gaierror as e:
+            raise ValueError(f"Cannot resolve host {hostname}: {e}")
+        ips = [res[4][0] for res in addrs]
+
+    for ip_str in ips:
+        if _ip_is_blocked(ip_str):
+            raise ValueError(f"Blocked address {ip_str} for host {hostname}")
+
+
+def _safe_get(url: str, *, max_redirects: int = 5, **kwargs) -> "requests.Response":
+    """
+    requests.get with SSRF protection on every hop. Redirects are followed
+    manually so each intermediate URL is validated before it's fetched
+    (a public URL that 302s to http://qdrant:6333 is blocked).
+    """
+    kwargs.setdefault("timeout", 30)
+    kwargs["allow_redirects"] = False
+    current = url
+    for _ in range(max_redirects + 1):
+        _assert_url_allowed(current)
+        resp = requests.get(current, **kwargs)
+        if resp.status_code in (301, 302, 303, 307, 308):
+            location = resp.headers.get("Location")
+            if not location:
+                return resp
+            current = urljoin(current, location)
+            continue
+        return resp
+    raise ValueError(f"Too many redirects fetching {url}")
 
 
 # ============================================================================
@@ -117,9 +194,15 @@ def chunk_text(text: str, title: str, doc_type: str, url: str = "", extra_meta: 
                     }
                 })
                 chunk_index += 1
-                # Overlap: keep last CHUNK_OVERLAP tokens of previous buffer
+                # Overlap: keep last CHUNK_OVERLAP tokens of previous buffer,
+                # snapped to a word boundary so it doesn't start mid-word.
                 tail_chars = CHUNK_OVERLAP * 4
-                overlap_text = buffer[-tail_chars:] if len(buffer) > tail_chars else buffer
+                if len(buffer) > tail_chars:
+                    overlap_text = buffer[-tail_chars:]
+                    if " " in overlap_text:
+                        overlap_text = overlap_text[overlap_text.index(" ") + 1:]
+                else:
+                    overlap_text = buffer
                 buffer = overlap_text + para + "\n\n"
             else:
                 buffer = para + "\n\n"
@@ -260,8 +343,8 @@ def ingest_doc(file_path: str, title: str, url_hint: str = "") -> Tuple[List[Dic
 # ============================================================================
 
 def _extract_text_requests(url: str) -> str:
-    """Fallback scraper using requests + BeautifulSoup."""
-    response = requests.get(url, timeout=30, headers={"User-Agent": "Mozilla/5.0"})
+    """Fallback scraper using requests + BeautifulSoup (SSRF-guarded)."""
+    response = _safe_get(url, headers={"User-Agent": "Mozilla/5.0"})
     response.raise_for_status()
     soup = BeautifulSoup(response.content, "html.parser")
     for tag in soup(["script", "style", "nav", "footer", "header", "aside"]):
@@ -271,6 +354,20 @@ def _extract_text_requests(url: str) -> str:
 
 def _extract_text_scrapling(url: str) -> str:
     """Primary scraper using Scrapling — handles JS-rendered pages and anti-bot."""
+    _assert_url_allowed(url)
+    # Resolve the redirect chain through the SSRF-guarded getter and hand
+    # Scrapling the already-validated FINAL URL, so Scrapling's own internal
+    # redirect following can't be steered to an internal target. A blocked hop
+    # raises ValueError (abort); non-SSRF errors (anti-bot/network) fall through
+    # so Scrapling can still try the already-validated seed URL.
+    try:
+        resolved = str(_safe_get(url).url)
+        _assert_url_allowed(resolved)
+        url = resolved
+    except ValueError:
+        raise
+    except Exception:
+        pass
     from scrapling import Fetcher, PlayWrightFetcher
     try:
         # Try fast fetch first (handles most sites + basic anti-bot)
@@ -304,19 +401,31 @@ def ingest_url(url: str, title: str) -> Tuple[List[Dict], int]:
     Raises:
         ValueError: If insufficient text is extracted
     """
+    _assert_url_allowed(url)  # SSRF guard (fail fast with a clear message)
     text = ""
 
-    # Try Scrapling first
+    # Primary: SSRF-guarded requests fetch. _safe_get validates EVERY redirect
+    # hop, so this path cannot be tricked into reaching an internal target.
+    # Handles static pages (including the typical corpus) completely.
     try:
-        text = _extract_text_scrapling(url)
-        logger.info(f"[URL] Scrapling extracted {len(text)} chars from {url}")
+        text = _extract_text_requests(url)
+        logger.info(f"[URL] requests extracted {len(text)} chars from {url}")
     except Exception as e:
-        logger.warning(f"[URL] Scrapling failed ({e}), falling back to requests")
+        logger.warning(f"[URL] requests fetch failed ({e}), trying Scrapling")
+        text = ""
+
+    # Fallback: Scrapling/Playwright for JS-rendered/anti-bot pages, only when
+    # the guarded fetch came back thin. The seed URL is validated; this path is
+    # a last resort because it can't validate Scrapling's internal redirects.
+    if len(text) < 200:
         try:
-            text = _extract_text_requests(url)
-            logger.info(f"[URL] requests fallback extracted {len(text)} chars from {url}")
-        except Exception as e2:
-            raise ValueError(f"Failed to fetch {url}: {e2}")
+            scrap_text = _extract_text_scrapling(url)
+            if len(scrap_text) > len(text):
+                text = scrap_text
+            logger.info(f"[URL] Scrapling extracted {len(scrap_text)} chars from {url}")
+        except Exception as e:
+            if not text:
+                raise ValueError(f"Failed to fetch {url}: {e}")
 
     if len(text) < 100:
         raise ValueError(f"Insufficient text extracted from {url} ({len(text)} chars)")
@@ -540,7 +649,7 @@ def _is_relevant(link: str, seed: str, same_domain_only: bool) -> bool:
 
 
 def _fetch_page(url: str):
-    response = requests.get(url, timeout=20, headers={"User-Agent": "Mozilla/5.0 (RAGCrawler)"})
+    response = _safe_get(url, timeout=20, headers={"User-Agent": "Mozilla/5.0 (RAGCrawler)"})
     response.raise_for_status()
     ct = (response.headers.get("Content-Type") or "").lower()
     if "html" not in ct and "xml" not in ct and "text" not in ct:
@@ -565,13 +674,14 @@ def ingest_crawl(
     BFS-crawl from seed_url. Each visited page contributes chunks tagged
     with its actual page URL. Respects robots.txt; same-domain by default.
     """
+    _assert_url_allowed(seed_url)  # fail fast with a clear SSRF error
     seed_norm = _normalize_url(seed_url)
     rp = None
     if respect_robots and Protego is not None:
         parsed = urlparse(seed_url)
         robots_url = f"{parsed.scheme}://{parsed.netloc}/robots.txt"
         try:
-            r = requests.get(robots_url, timeout=10, headers={"User-Agent": "RAGCrawler"})
+            r = _safe_get(robots_url, timeout=10, headers={"User-Agent": "RAGCrawler"})
             if r.status_code == 200:
                 rp = Protego.parse(r.text)
         except Exception as e:
