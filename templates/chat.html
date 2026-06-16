@@ -147,7 +147,7 @@ function addMessageToHistory(role, content) {
             .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
             .replace(/__(.*?)__/g, '<strong>$1</strong>')
             .replace(/- /g, '• ')
-            .replace(/\[(\d+)\]/g, (m, n) => { const s = (window.lastSources||[])[parseInt(n)-1]; const href = s && (s.anchor_url || s.page_url || s.url); if (href) { return '<a href="' + href.replace(/"/g, '&quot;') + '" target="_blank" rel="noopener" class="badge bg-info text-white text-decoration-none">[' + n + ']</a>'; } return '<span class="badge bg-info text-white">[' + n + ']</span>'; });
+            .replace(/\[(\d+)\]/g, (m, n) => { const s = (window.lastSources||[])[parseInt(n)-1]; const href = s && (s.anchor_url || s.page_url || s.url); const safeHref = (href && /^https?:\/\//i.test(href)) ? href.replace(/"/g, '&quot;') : null; if (safeHref) { return '<a href="' + safeHref + '" target="_blank" rel="noopener" class="badge bg-info text-white text-decoration-none">[' + n + ']</a>'; } return '<span class="badge bg-info text-white">[' + n + ']</span>'; });
     }
 
     messageDiv.appendChild(bubble);

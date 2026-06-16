@@ -355,6 +355,19 @@ def _extract_text_requests(url: str) -> str:
 def _extract_text_scrapling(url: str) -> str:
     """Primary scraper using Scrapling — handles JS-rendered pages and anti-bot."""
     _assert_url_allowed(url)
+    # Resolve the redirect chain through the SSRF-guarded getter and hand
+    # Scrapling the already-validated FINAL URL, so Scrapling's own internal
+    # redirect following can't be steered to an internal target. A blocked hop
+    # raises ValueError (abort); non-SSRF errors (anti-bot/network) fall through
+    # so Scrapling can still try the already-validated seed URL.
+    try:
+        resolved = str(_safe_get(url).url)
+        _assert_url_allowed(resolved)
+        url = resolved
+    except ValueError:
+        raise
+    except Exception:
+        pass
     from scrapling import Fetcher, PlayWrightFetcher
     try:
         # Try fast fetch first (handles most sites + basic anti-bot)
