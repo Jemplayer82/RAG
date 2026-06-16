@@ -289,17 +289,30 @@ async def register(user_data: UserCreate, db: Session = Depends(get_db)):
     if existing:
         raise HTTPException(status_code=400, detail="Username or email already registered")
 
-    is_first_user = db.query(User).count() == 0
+    # Admin assignment, hardened against the "land-grab" (a stranger registering
+    # first on a briefly-exposed deploy). A new user becomes admin ONLY if no
+    # admin exists yet AND either ADMIN_USERNAME matches them, or ADMIN_USERNAME
+    # is unset and they are the very first user. Once an admin exists, no
+    # registration can ever mint another admin.
+    admin_username = os.getenv("ADMIN_USERNAME", "").strip()
+    admin_exists = db.query(User).filter(User.is_admin == True).count() > 0
+    if admin_exists:
+        is_admin = False
+    elif admin_username:
+        is_admin = (user_data.username == admin_username)
+    else:
+        is_admin = (db.query(User).count() == 0)
+
     user = User(
         username=user_data.username,
         email=user_data.email,
         hashed_password=hash_password(user_data.password),
-        is_admin=is_first_user,
+        is_admin=is_admin,
     )
     db.add(user)
     db.commit()
     db.refresh(user)
-    logger.info(f"[AUTH] Registered: {user.username}{' (admin)' if is_first_user else ''}")
+    logger.info(f"[AUTH] Registered: {user.username}{' (admin)' if is_admin else ''}")
     return user
 
 
