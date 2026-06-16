@@ -355,7 +355,8 @@ async def chat(req: ChatRequest, user: User = Depends(get_current_user), db: Ses
         logger.error(f"[CHAT] Error: {e}")
         if "connect" in str(e).lower():
             raise HTTPException(status_code=503, detail="Cannot connect to LLM. Please check provider settings.")
-        raise HTTPException(status_code=500, detail=str(e))
+        # Don't leak internal exception detail to clients; it's logged above.
+        raise HTTPException(status_code=500, detail="Failed to process your question. Please try again.")
 
 
 # ============================================================================
@@ -669,8 +670,8 @@ async def update_settings(
     db: Session = Depends(get_db)
 ):
     """Update user profile settings."""
-    if "email" in data:
-        user.email = data["email"].strip()
+    if "email" in data and data["email"]:
+        user.email = str(data["email"]).strip()
         db.commit()
     return {"status": "updated"}
 

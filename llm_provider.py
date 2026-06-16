@@ -78,7 +78,10 @@ async def _call_anthropic(prompt: str, config: Dict) -> str:
         messages=[{"role": "user", "content": prompt}],
         temperature=config.get("temperature", 0.3),
     )
-    return response.content[0].text
+    # Guard against empty / non-text responses (refusals, tool-use blocks).
+    if not response.content:
+        return ""
+    return getattr(response.content[0], "text", "") or ""
 
 
 async def _call_ollama(prompt: str, config: Dict) -> str:
@@ -146,7 +149,10 @@ async def _call_generic(prompt: str, config: Dict) -> str:
         )
         response.raise_for_status()
         data = response.json()
-        return data.get("choices", [{}])[0].get("message", {}).get("content", "")
+        choices = data.get("choices") or []
+        if not choices:
+            raise RuntimeError(f"Generic provider returned no choices: {str(data)[:200]}")
+        return choices[0].get("message", {}).get("content", "") or ""
 
 
 # ============================================================================
