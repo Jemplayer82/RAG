@@ -6,6 +6,7 @@ Async ingestion pipeline for RAG v2.0.
 """
 
 import asyncio
+import hashlib
 import logging
 from typing import Dict, List, Tuple
 from datetime import datetime
@@ -46,15 +47,15 @@ class QdrantManager:
         self.client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
         self._ensure_collection()
 
-    def _ensure_collection(self):
-        """Create collection if it doesn't exist."""
+    def _ensure_collection(self, size: int = EMBED_DIM):
+        """Create collection if it doesn't exist, with the given vector size."""
         existing = [c.name for c in self.client.get_collections().collections]
         if self.collection_name not in existing:
             self.client.create_collection(
                 collection_name=self.collection_name,
-                vectors_config=VectorParams(size=EMBED_DIM, distance=Distance.COSINE)
+                vectors_config=VectorParams(size=size, distance=Distance.COSINE)
             )
-            logger.info(f"[QDRANT] Created collection: {self.collection_name}")
+            logger.info(f"[QDRANT] Created collection: {self.collection_name} (dim={size})")
 
     def upsert_chunks(self, chunks: List[Dict], embedder: SentenceTransformer, doc_id_prefix: str) -> int:
         """Embed chunks and upsert into Qdrant. Returns chunk count."""
@@ -64,9 +65,21 @@ class QdrantManager:
         texts = [c["text"] for c in chunks]
         embeddings = embedder.encode(texts, convert_to_tensor=False, show_progress_bar=False)
 
+        # Create the collection (if missing) using the embedding model's actual
+        # dimension rather than a hardcoded constant — guards against EMBED_MODEL
+        # being changed to a different-dimension model.
+        dim = len(embeddings[0]) if len(embeddings) else EMBED_DIM
+        self._ensure_collection(size=dim)
+
         points = []
         for i, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
-            point_id = abs(hash(f"{doc_id_prefix}_{i}")) % (2**63)
+            # Stable, deterministic point ID. Python's built-in hash() is
+            # per-process randomized (PYTHONHASHSEED), which would assign a new
+            # ID to the same chunk on every re-ingest and create duplicate
+            # vectors instead of overwriting.
+            point_id = int.from_bytes(
+                hashlib.sha1(f"{doc_id_prefix}_{i}".encode()).digest()[:8], "big"
+            )
             points.append(PointStruct(
                 id=point_id,
                 vector=embedding.tolist(),
@@ -158,11 +171,41 @@ async def ingest_url_async(url: str, title: str) -> Tuple[List[Dict], int]:
 # BACKGROUND JOB FUNCTION (called by Redis RQ worker)
 # ============================================================================
 
+# Module-level embedder cache so the model loads ONCE per worker process,
+# not once per job. Device is resolved from the admin DB config (falling back
+# to the EMBED_DEVICE env), matching the query path in rag_async.
+_worker_embedder = None
+
+
+def _resolve_worker_device() -> str:
+    try:
+        from models import LLMProviderConfig, get_session_local
+        SessionLocal = get_session_local()
+        with SessionLocal() as session:
+            config = session.query(LLMProviderConfig).first()
+            if config and config.embed_device:
+                return config.embed_device
+    except Exception:
+        pass
+    return EMBED_DEVICE
+
+
+def _get_worker_embedder() -> SentenceTransformer:
+    global _worker_embedder
+    if _worker_embedder is None:
+        device = _resolve_worker_device()
+        logger.info(f"[WORKER] Loading embedder {EMBED_MODEL} on {device}")
+        _worker_embedder = SentenceTransformer(EMBED_MODEL, device=device)
+    return _worker_embedder
+
+
 def run_ingestion_job(
     file_path: str,
     title: str,
     doc_type: str,
     user_id: int,
+    document_id: int = None,
+    job_id: int = None,
     url: str = "",
     doc_id_prefix: str = "",
     crawl: bool = False,
@@ -172,39 +215,78 @@ def run_ingestion_job(
     respect_robots: bool = False,
 ) -> int:
     """
-    Synchronous function executed by Redis RQ worker.
-    Ingests a document and stores in Qdrant for the given user.
+    Synchronous function executed by the Redis RQ worker.
+
+    Ingests a document into the user's Qdrant collection and writes the result
+    straight back to Postgres (Document.chunks + IngestionJob status), so the
+    library is correct even if the client never polls the job-status endpoint.
     Returns number of chunks stored.
     """
-    logger.info(f"[WORKER] Starting ingestion: {title} (user={user_id}, type={doc_type})")
+    from models import Document, IngestionJob, get_session_local
 
-    # Ingest based on type
-    if doc_type == "pdf":
-        chunks, _ = ingest_pdf(file_path, title, url)
-    elif doc_type == "txt":
-        chunks, _ = ingest_txt(file_path, title, url)
-    elif doc_type == "docx":
-        chunks, _ = ingest_docx(file_path, title, url)
-    elif doc_type == "doc":
-        chunks, _ = ingest_doc(file_path, title, url)
-    elif doc_type == "url":
-        if crawl:
-            chunks, _ = ingest_crawl(url, title, max_depth=max_depth, max_pages=max_pages, same_domain_only=same_domain_only, respect_robots=respect_robots)
+    try:
+        logger.info(f"[WORKER] Starting ingestion: {title} (user={user_id}, type={doc_type})")
+
+        # Ingest based on type
+        if doc_type == "pdf":
+            chunks, _ = ingest_pdf(file_path, title, url)
+        elif doc_type == "txt":
+            chunks, _ = ingest_txt(file_path, title, url)
+        elif doc_type == "docx":
+            chunks, _ = ingest_docx(file_path, title, url)
+        elif doc_type == "doc":
+            chunks, _ = ingest_doc(file_path, title, url)
+        elif doc_type == "url":
+            if crawl:
+                chunks, _ = ingest_crawl(url, title, max_depth=max_depth, max_pages=max_pages, same_domain_only=same_domain_only, respect_robots=respect_robots)
+            else:
+                chunks, _ = ingest_url(url, title)
         else:
-            chunks, _ = ingest_url(url, title)
-    else:
-        raise ValueError(f"Unknown doc_type: {doc_type}")
+            raise ValueError(f"Unknown doc_type: {doc_type}")
 
-    if not chunks:
-        raise ValueError(f"No content extracted from {title}")
+        if not chunks:
+            raise ValueError(f"No content extracted from {title}")
 
-    # Embed and store in Qdrant
-    embedder = SentenceTransformer(EMBED_MODEL, device=EMBED_DEVICE)
-    qm = QdrantManager(user_id=user_id)
+        # Embed and store in Qdrant (cached embedder)
+        embedder = _get_worker_embedder()
+        qm = QdrantManager(user_id=user_id)
 
-    if not doc_id_prefix:
-        doc_id_prefix = f"{doc_type}_{title.lower().replace(' ', '_')}"
+        if not doc_id_prefix:
+            doc_id_prefix = f"{doc_type}_{title.lower().replace(' ', '_')}"
 
-    count = qm.upsert_chunks(chunks, embedder, doc_id_prefix)
-    logger.info(f"[WORKER] Ingestion complete: {title} → {count} chunks (user={user_id})")
-    return count
+        count = qm.upsert_chunks(chunks, embedder, doc_id_prefix)
+        logger.info(f"[WORKER] Ingestion complete: {title} → {count} chunks (user={user_id})")
+
+        # Worker owns the truth: persist result to Postgres directly so the
+        # library is correct without depending on the client polling.
+        if document_id or job_id:
+            SessionLocal = get_session_local()
+            with SessionLocal() as session:
+                if document_id:
+                    doc = session.get(Document, document_id)
+                    if doc:
+                        doc.chunks = count
+                if job_id:
+                    job = session.get(IngestionJob, job_id)
+                    if job:
+                        job.status = "complete"
+                        job.completed_at = datetime.utcnow()
+                session.commit()
+
+        return count
+
+    except Exception as e:
+        logger.error(f"[WORKER] Ingestion failed for {title}: {e}")
+        if job_id:
+            try:
+                SessionLocal = get_session_local()
+                with SessionLocal() as session:
+                    job = session.get(IngestionJob, job_id)
+                    if job:
+                        job.status = "error"
+                        job.error_msg = str(e)
+                        job.completed_at = datetime.utcnow()
+                        session.commit()
+            except Exception as inner:
+                logger.warning(f"[WORKER] Could not record job error: {inner}")
+        raise

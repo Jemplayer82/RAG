@@ -414,8 +414,6 @@ async def add_source(
     else:
         raise HTTPException(status_code=400, detail="Invalid source type or missing file/URL")
 
-    doc_id_prefix = f"{doc_type}_{title.lower().replace(' ', '_')}"
-
     # Create Document record (chunks=0 until job completes)
     doc = Document(
         user_id=user.id,
@@ -436,6 +434,16 @@ async def add_source(
     db.commit()
     db.refresh(job_record)
 
+    # Stable, unique document identifier for Qdrant points, derived from the
+    # immutable primary key — used for BOTH upsert and delete so two docs with
+    # the same title/type never collide and deletes are exact. Capture plain
+    # ids now so the inline-fallback task never touches the request-scoped
+    # session/ORM objects (get_db() closes them once this response returns).
+    doc_id_prefix = f"doc_{doc.id}"
+    document_id = doc.id
+    job_record_id = job_record.id
+    owner_id = user.id
+
     # Enqueue background job in Redis RQ (falls back to inline on Windows/no Redis)
     use_inline = False
     try:
@@ -446,7 +454,9 @@ async def add_source(
                 "file_path": file_path,
                 "title": title,
                 "doc_type": doc_type,
-                "user_id": user.id,
+                "user_id": owner_id,
+                "document_id": document_id,
+                "job_id": job_record_id,
                 "url": source_url,
                 "doc_id_prefix": doc_id_prefix,
                 "crawl": crawl,
@@ -466,26 +476,22 @@ async def add_source(
         use_inline = True
 
     if use_inline:
-        # Run in background task so polling still works
+        # Run in a background task. run_ingestion_job opens its OWN DB session
+        # and writes Document.chunks + job status/error itself, so we hand it
+        # only plain ids — never the request-scoped session or ORM objects,
+        # which get_db() has already closed by the time this task runs.
         async def run_inline():
-            job_record.status = "running"
-            db.commit()
             try:
-                count = await asyncio.to_thread(
+                await asyncio.to_thread(
                     run_ingestion_job,
                     file_path=file_path, title=title, doc_type=doc_type,
-                    user_id=user.id, url=source_url, doc_id_prefix=doc_id_prefix,
-                    crawl=crawl, max_depth=max_depth, max_pages=max_pages, same_domain_only=same_domain_only, respect_robots=respect_robots,
+                    user_id=owner_id, document_id=document_id, job_id=job_record_id,
+                    url=source_url, doc_id_prefix=doc_id_prefix,
+                    crawl=crawl, max_depth=max_depth, max_pages=max_pages,
+                    same_domain_only=same_domain_only, respect_robots=respect_robots,
                 )
-                doc.chunks = count
-                job_record.status = "complete"
-                job_record.completed_at = datetime.utcnow()
-                db.commit()
-                logger.info(f"[SOURCES] Inline ingestion complete: {title} → {count} chunks")
+                logger.info(f"[SOURCES] Inline ingestion complete: {title}")
             except Exception as ingest_err:
-                job_record.status = "error"
-                job_record.error_msg = str(ingest_err)
-                db.commit()
                 logger.error(f"[SOURCES] Inline ingestion failed: {ingest_err}")
 
         asyncio.create_task(run_inline())
@@ -588,8 +594,9 @@ async def delete_source(
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
-    # Remove from Qdrant
-    doc_id_prefix = f"{doc.doc_type}_{doc.title.lower().replace(' ', '_')}"
+    # Remove from Qdrant using the same stable, unique prefix used at ingest
+    # time (doc_{id}) — never reconstruct from the title (collisions/orphans).
+    doc_id_prefix = f"doc_{doc.id}"
     try:
         qm = QdrantManager(user_id=user.id)
         await asyncio.to_thread(qm.delete_document, doc_id_prefix)
