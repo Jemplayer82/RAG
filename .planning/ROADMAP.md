@@ -9,7 +9,7 @@ Take a freshly-cloned, already-running RAG app from "boots and looks fine" to "v
 - [x] **Phase 1: Critical Fixes** — correctness, data-integrity, and high-severity security blockers
 - [x] **Phase 2: Quality Fixes** — retrieval quality, injection/XSS, cleanup, docs; then rebuild
 - [x] **Phase 3: User Simulation & Break-Testing** — drive the app end-to-end, fix what breaks
-- [ ] **Phase 4: Security Audit** — Semgrep + /security-review + targeted re-probe
+- [x] **Phase 4: Security Audit** — Semgrep + /security-review + targeted re-probe
 
 ## Phase Details
 
@@ -79,4 +79,4 @@ Plans:
 | 1. Critical Fixes | 1/1 | Complete | 2026-06-16 |
 | 2. Quality Fixes | 1/1 | Complete | 2026-06-16 |
 | 3. User Simulation | 1/1 | Complete | 2026-06-16 |
-| 4. Security Audit | 0/TBD | Not started | - |
+| 4. Security Audit | 1/1 | Complete | 2026-06-16 |

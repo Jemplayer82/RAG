@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-06-16)
 
 ## Current Position
 
-Phase: 4 of 4 (Security Audit)
-Plan: 0 of TBD
-Status: Phases 1–3 complete; full UAT passed against deployed fixed code; ready for Phase 4
-Last activity: 2026-06-16 — Phase 3 user-sim passed; caught+fixed the pull_policy:always deploy bug (local builds were never deploying); re-ran full UAT clean
+Phase: 4 of 4 (Security Audit) — COMPLETE
+Plan: done
+Status: All 4 phases complete. Semgrep clean (3 accepted warnings); security review's 2 real findings (1 HIGH SSRF-via-Scrapling, 1 MED XSS) fixed + SSRF re-verified live; residuals documented.
+Last activity: 2026-06-16 — Phase 4 security audit done; SECURITY.md written
 
-Progress: [████████░░] 75%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
