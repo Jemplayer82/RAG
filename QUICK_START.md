@@ -1,226 +1,54 @@
-# 🚀 Quick Start — Get RAG Running in 5 Minutes
+# 🚀 Quick Start
 
-Follow these steps to run RAG locally and see it in action.
+RAG v2.0 is a **FastAPI + Postgres + Qdrant + Redis/RQ + Ollama** stack, run with Docker Compose. (Earlier docs described a Flask/ChromaDB v1 — that is gone; this is the current app.)
 
----
+## 1. Prerequisites
+- Docker + Docker Compose
+- ~6 GB free RAM (embedding model + services); a GPU is optional
 
-## Step 1: Start Ollama (if not already running)
-
-Open a terminal and run:
-
-```bash
-ollama serve
-```
-
-You should see:
-```
-Listening on 127.0.0.1:11434
-```
-
-Leave this terminal open.
-
-**First time?** Pull a model first:
-```bash
-ollama pull mistral-small3.1
-```
-
----
-
-## Step 2: Start RAG
-
-Open a **new terminal** and navigate to the RAG folder:
+## 2. Configure
+From a clone of this repo:
 
 ```bash
-cd "C:\Users\Landon\OneDrive\Documents\Ai Projects\RAG"
+cp .env.example .env
+# Edit .env — the only REQUIRED value is POSTGRES_PASSWORD.
+# JWT_SECRET and ENCRYPTION_KEY auto-generate + persist on first boot.
+# DATA_ROOT defaults to /storage/rag (Linux). On other hosts point it somewhere real, e.g.:
+#   DATA_ROOT=C:/Users/you/Projects/RAG/data
+# Optional but recommended: ADMIN_USERNAME=<your-username> to pin who can become admin.
 ```
 
-Then run:
-
-**Windows:**
+Create the data subdirectories `DATA_ROOT` points at before the first run:
 ```bash
-run.bat
+mkdir -p "$DATA_ROOT"/{postgres,qdrant,redis,uploads,ollama}
 ```
 
-**Linux/macOS:**
+## 3. Start
 ```bash
-bash run.sh
+docker compose up -d --build     # builds locally via docker-compose.override.yml
+docker compose ps                # all 6 services should be healthy
+curl http://localhost:8000/api/health
 ```
 
-You should see:
-```
-✅ Everything ready!
+Open **http://localhost:8000**.
 
-🌐 Starting Flask server on http://localhost:5000
-   Press Ctrl+C to stop
-```
+## 4. First-run setup
+1. **Register** the first account — it becomes the admin (or the account matching `ADMIN_USERNAME`).
+2. Go to **Admin → LLM Provider Settings** (`/admin/llm-settings`).
+   - For local inference: provider **ollama**, base URL `http://ollama:11434`, then **Pull** a model (e.g. `llama3.1:8b`) and **Test Connection**.
+   - Or pick `openai` / `anthropic` / `generic` and paste an API key (stored Fernet-encrypted).
+3. **Add Sources** (`/upload`, admin only) — upload PDF/TXT/DOCX or add a URL (optionally crawl). Ingestion runs in the background worker; the page polls until complete.
+4. **Chat** (`/`) — ask questions; answers cite sources `[N]`. Any registered user can chat against the admin's library.
 
----
-
-## Step 3: Open in Browser
-
-Go to: **http://localhost:5000**
-
-You should see the RAG Assistant interface with 4 nav buttons:
-- 💬 **Chat**
-- 📚 **Library**
-- ➕ **Add Sources**
-- ⚙️ **Settings**
-
----
-
-## Step 4: Add a Test Document
-
-### Option A: Upload a PDF
-
-1. Click **Add Sources**
-2. Click **Upload File** tab
-3. Select any PDF from your computer
-4. Give it a title (e.g., "Test Document")
-5. Click **Upload & Ingest**
-
-Wait 10-30 seconds for embedding (progress shown in browser).
-
-### Option B: Add a Web URL
-
-1. Click **Add Sources**
-2. Click **Add URL** tab
-3. Paste a URL (e.g., `https://en.wikipedia.org/wiki/Artificial_intelligence`)
-4. Give it a title
-5. Click **Fetch & Ingest**
-
-### Option C: Use a Sample Document
-
-No files? Use this simple test:
-1. Create a text file `test.txt`:
-   ```
-   RAG stands for Retrieval-Augmented Generation.
-   It combines document search with language models.
-   RAG improves accuracy by grounding answers in sources.
-   ```
-2. Upload it via **Add Sources** → **Upload File**
-
----
-
-## Step 5: Ask a Question
-
-1. Click **Chat**
-2. Type a question about your document, e.g.:
-   - "What is RAG?"
-   - "Summarize the document"
-   - "What does RAG stand for?"
-3. Press Send or click the Send button
-4. Watch it retrieve relevant chunks and generate an answer
-
-You should see:
-- The **answer** on the left
-- **Sources** (with citations) on the right
-- Each source shows doc type, title, and link
-
----
-
-## Step 6: Manage Your Library
-
-1. Click **Library**
-2. You'll see all indexed documents with:
-   - Document name
-   - Type (pdf, txt, url)
-   - Number of chunks indexed
-   - Links to source
-
-3. Click **Re-index All** to rebuild the vector index (takes longer for large docs)
-
----
-
-## Step 7: Configure Settings (Optional)
-
-1. Click **Settings**
-2. **LLM Model** — select from models in your Ollama instance
-3. **Library Location** — change where documents are stored (requires restart)
-
----
-
-## 🎯 What You're Seeing
-
-### How It Works
-
-```
-Your Question
-    ↓
-[Search in vector DB]
-    ↓
-[Rank results with keyword matching]
-    ↓
-[Pass top chunks + question to Ollama]
-    ↓
-[LLM generates answer with citations]
-    ↓
-You see answer + sources
+## 5. Useful commands
+```bash
+docker compose logs -f rag           # app logs
+docker compose logs -f rag-worker    # ingestion worker
+docker compose exec rag-ollama-1 ollama list   # installed models
+docker compose down                  # stop (data persists in DATA_ROOT)
 ```
 
-### The Stack
-
-- **Flask** — web server
-- **ChromaDB** — vector database (stores document embeddings)
-- **BAAI/bge embeddings** — converts text to vectors
-- **Ollama + Mistral** — generates answers
-- **BM25** — keyword ranking for precision
-
----
-
-## 🔧 Troubleshooting
-
-### "Cannot connect to Ollama"
-- Make sure `ollama serve` is running in another terminal
-- Check http://localhost:11434 is accessible
-
-### "No sources found when searching"
-- Upload a document first via **Add Sources**
-- Wait for embedding to complete (10-30s depending on file size)
-- Refresh the page
-
-### "Model not found"
-- In Settings, check which model is selected
-- Make sure it's pulled: `ollama pull mistral-small3.1`
-
-### App is slow
-- Large PDFs take time to embed
-- First query is slower (initializes embedder)
-- Subsequent queries are faster
-
----
-
-## 📚 Next Steps
-
-### Explore Features
-
-1. **Upload multiple documents** — try PDFs, TXT, and URLs
-2. **Multi-turn chat** — ask follow-up questions (history preserved)
-3. **Delete documents** — go to Add Sources → Manage tab
-4. **Change models** — try different Ollama models in Settings
-
-### Read More
-
-- **Full guide:** See `README.md`
-- **Setup details:** See `DEPLOYMENT.md`
-- **Next version:** See `PLAN.md` (FastAPI + Docker)
-
-### Stop the App
-
-In the Flask terminal, press **Ctrl+C**
-
----
-
-## 🚀 Ready to Go Production?
-
-Once you've tested locally and want to deploy with:
-- ✅ Multiple users
-- ✅ Docker containers
-- ✅ PostgreSQL auth
-- ✅ HTTPS
-- ✅ Job queue for ingestion
-
-See `PLAN.md` for the v2.0 FastAPI + Docker roadmap.
-
----
-
-**Questions?** Check `README.md` or `DEPLOYMENT.md` for detailed guides.
+## Notes
+- `/api/docs` (interactive API) is available only when `DEBUG=true`.
+- Embedding model `BAAI/bge-large-en-v1.5` (~1.3 GB) downloads on first ingestion — the first job is slow.
+- Uploads are capped at 50 MB; URL ingestion is SSRF-guarded (internal hosts/IPs blocked).
