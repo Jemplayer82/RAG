@@ -45,7 +45,13 @@ class QdrantManager:
         self.user_id = user_id
         self.collection_name = f"user_{user_id}"
         self.client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
-        self._ensure_collection()
+        # NOTE: the collection is created lazily on first upsert with the
+        # embedding model's ACTUAL dimension (see upsert_chunks). Creating it
+        # here would force the hardcoded EMBED_DIM before any vector exists.
+        # Read/delete ops below tolerate the collection not existing yet.
+
+    def _collection_exists(self) -> bool:
+        return self.collection_name in [c.name for c in self.client.get_collections().collections]
 
     def _ensure_collection(self, size: int = EMBED_DIM):
         """Create collection if it doesn't exist, with the given vector size."""
@@ -96,6 +102,8 @@ class QdrantManager:
 
     def delete_document(self, doc_id_prefix: str) -> None:
         """Remove all chunks for a specific document from Qdrant."""
+        if not self._collection_exists():
+            return
         self.client.delete(
             collection_name=self.collection_name,
             points_selector=Filter(
@@ -109,6 +117,8 @@ class QdrantManager:
 
     def list_documents(self) -> List[Dict]:
         """List unique documents in this user's collection."""
+        if not self._collection_exists():
+            return []
         result = self.client.scroll(
             collection_name=self.collection_name,
             with_payload=True,
@@ -128,6 +138,8 @@ class QdrantManager:
 
     def search(self, query_vector: List[float], top_k: int = 8) -> List[Dict]:
         """Semantic search in user's collection."""
+        if not self._collection_exists():
+            return []
         results = self.client.search(
             collection_name=self.collection_name,
             query_vector=query_vector,
@@ -145,6 +157,8 @@ class QdrantManager:
 
     def count(self) -> int:
         """Return number of vectors in user's collection."""
+        if not self._collection_exists():
+            return 0
         return self.client.count(collection_name=self.collection_name).count
 
 

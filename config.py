@@ -41,9 +41,10 @@ CACHE_ROOT = _resolve_data_dir()
 RAW_DIR = CACHE_ROOT / "raw"
 CHROMA_DIR = CACHE_ROOT / "chroma"
 
-# Create directories
+# Create directories. Uploads live at CACHE_ROOT/uploads (matching where
+# app_fastapi.py writes them) — not under RAW_DIR.
 RAW_DIR.mkdir(parents=True, exist_ok=True)
-(RAW_DIR / "uploads").mkdir(exist_ok=True)
+(CACHE_ROOT / "uploads").mkdir(parents=True, exist_ok=True)
 CHROMA_DIR.mkdir(parents=True, exist_ok=True)
 
 # ============================================================================

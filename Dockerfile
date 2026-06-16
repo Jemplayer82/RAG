@@ -15,7 +15,8 @@ RUN apt-get update && apt-get install -y \
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt && \
-    python -m playwright install chromium --with-deps 2>/dev/null || true
+    (python -m playwright install chromium --with-deps \
+     || echo "WARNING: playwright/chromium install failed; JS scraping will fall back to requests")
 
 COPY . .
 

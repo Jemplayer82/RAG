@@ -385,17 +385,28 @@ def ingest_url(url: str, title: str) -> Tuple[List[Dict], int]:
     _assert_url_allowed(url)  # SSRF guard (fail fast with a clear message)
     text = ""
 
-    # Try Scrapling first
+    # Primary: SSRF-guarded requests fetch. _safe_get validates EVERY redirect
+    # hop, so this path cannot be tricked into reaching an internal target.
+    # Handles static pages (including the typical corpus) completely.
     try:
-        text = _extract_text_scrapling(url)
-        logger.info(f"[URL] Scrapling extracted {len(text)} chars from {url}")
+        text = _extract_text_requests(url)
+        logger.info(f"[URL] requests extracted {len(text)} chars from {url}")
     except Exception as e:
-        logger.warning(f"[URL] Scrapling failed ({e}), falling back to requests")
+        logger.warning(f"[URL] requests fetch failed ({e}), trying Scrapling")
+        text = ""
+
+    # Fallback: Scrapling/Playwright for JS-rendered/anti-bot pages, only when
+    # the guarded fetch came back thin. The seed URL is validated; this path is
+    # a last resort because it can't validate Scrapling's internal redirects.
+    if len(text) < 200:
         try:
-            text = _extract_text_requests(url)
-            logger.info(f"[URL] requests fallback extracted {len(text)} chars from {url}")
-        except Exception as e2:
-            raise ValueError(f"Failed to fetch {url}: {e2}")
+            scrap_text = _extract_text_scrapling(url)
+            if len(scrap_text) > len(text):
+                text = scrap_text
+            logger.info(f"[URL] Scrapling extracted {len(scrap_text)} chars from {url}")
+        except Exception as e:
+            if not text:
+                raise ValueError(f"Failed to fetch {url}: {e}")
 
     if len(text) < 100:
         raise ValueError(f"Insufficient text extracted from {url} ({len(text)} chars)")
