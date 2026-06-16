@@ -230,7 +230,10 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    # Auth is a Bearer token in localStorage (no cookies), so credentials are
+    # not needed. A wildcard origin with credentials is invalid per the CORS
+    # spec and makes Starlette reflect any Origin — keep credentials off.
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
