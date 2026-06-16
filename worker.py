@@ -37,12 +37,18 @@ def get_redis_connection():
 
 def reap_stale_jobs():
     """
-    On worker boot: any IngestionJob still in queued/running state belongs
-    to a previous worker that died. Mark them as error so the UI can show
-    the failure and the user can retry.
+    On worker boot: mark a queued/running IngestionJob as error ONLY if it is
+    not still live in Redis. A job that is still queued/started (or already
+    finished) in RQ is left alone — the worker will process it or the poller
+    will sync it. Blindly erroring every queued/running row would falsely fail
+    jobs that Redis is about to run, causing the UI to delete a document that
+    actually ingested successfully.
     """
     try:
         from models import IngestionJob, get_session_local
+        from rq.job import Job
+        from rq.exceptions import NoSuchJobException
+
         SessionLocal = get_session_local()
         db = SessionLocal()
         try:
@@ -51,13 +57,28 @@ def reap_stale_jobs():
             ).all()
             if not stale:
                 return
+
+            redis_conn = get_redis_connection()
             now = datetime.utcnow()
+            reaped = 0
             for job in stale:
+                if job.rq_job_id:
+                    try:
+                        rq_status = Job.fetch(job.rq_job_id, connection=redis_conn).get_status()
+                        # Still live, or already succeeded — leave for the worker/poller.
+                        if rq_status in ("queued", "started", "deferred", "scheduled", "finished"):
+                            continue
+                    except NoSuchJobException:
+                        pass  # gone from Redis → truly stale
+                # No rq_job_id, missing from Redis, or failed/stopped/canceled → reap.
                 job.status = "error"
                 job.error_msg = "Interrupted by worker restart; please re-submit the source."
                 job.completed_at = now
-            db.commit()
-            logger.info(f"Reaped {len(stale)} stale ingestion job(s) on boot.")
+                reaped += 1
+
+            if reaped:
+                db.commit()
+                logger.info(f"Reaped {reaped} stale ingestion job(s) on boot.")
         finally:
             db.close()
     except Exception as e:
