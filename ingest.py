@@ -194,9 +194,15 @@ def chunk_text(text: str, title: str, doc_type: str, url: str = "", extra_meta: 
                     }
                 })
                 chunk_index += 1
-                # Overlap: keep last CHUNK_OVERLAP tokens of previous buffer
+                # Overlap: keep last CHUNK_OVERLAP tokens of previous buffer,
+                # snapped to a word boundary so it doesn't start mid-word.
                 tail_chars = CHUNK_OVERLAP * 4
-                overlap_text = buffer[-tail_chars:] if len(buffer) > tail_chars else buffer
+                if len(buffer) > tail_chars:
+                    overlap_text = buffer[-tail_chars:]
+                    if " " in overlap_text:
+                        overlap_text = overlap_text[overlap_text.index(" ") + 1:]
+                else:
+                    overlap_text = buffer
                 buffer = overlap_text + para + "\n\n"
             else:
                 buffer = para + "\n\n"

@@ -30,8 +30,10 @@ Routes:
 """
 
 import asyncio
+import json
 import logging
 import os
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
@@ -220,11 +222,23 @@ class ChatResponse(BaseModel):
 # FASTAPI APP
 # ============================================================================
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info("RAG v2.0 FastAPI server starting...")
+    logger.info(f"Ollama: {OLLAMA_BASE_URL}")
+    logger.info(f"Cache: {CACHE_ROOT}")
+    init_db()
+    logger.info("Database tables initialized")
+    yield
+    logger.info("RAG v2.0 FastAPI server shutting down...")
+
+
 app = FastAPI(
     title="RAG Assistant",
     version="2.0.0",
     docs_url="/api/docs" if DEBUG else None,
     openapi_url="/api/openapi.json" if DEBUG else None,
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -616,6 +630,8 @@ async def download_source(
     if doc.doc_type == "url":
         if not doc.url:
             raise HTTPException(status_code=400, detail="URL document has no URL")
+        if not (doc.url.startswith("http://") or doc.url.startswith("https://")):
+            raise HTTPException(status_code=400, detail="Refusing to redirect to a non-http(s) URL")
         return RedirectResponse(url=doc.url, status_code=302)
 
     if not doc.cached_path:
@@ -849,13 +865,13 @@ async def pull_ollama_model(
                 ) as resp:
                     if resp.status_code >= 400:
                         body = await resp.aread()
-                        yield f'{{"error": "Ollama {resp.status_code}: {body.decode(errors="ignore")[:200]}"}}\n'
+                        yield json.dumps({"error": f"Ollama {resp.status_code}: {body.decode(errors='ignore')[:200]}"}) + "\n"
                         return
                     async for line in resp.aiter_lines():
                         if line:
                             yield line + "\n"
             except httpx.RequestError as e:
-                yield f'{{"error": "Cannot reach Ollama at {base_url}: {e}"}}\n'
+                yield json.dumps({"error": f"Cannot reach Ollama at {base_url}: {e}"}) + "\n"
 
     return StreamingResponse(stream_pull(), media_type="application/x-ndjson")
 
@@ -955,20 +971,6 @@ async def server_error_handler(request: Request, exc):
 # ============================================================================
 # STARTUP / SHUTDOWN
 # ============================================================================
-
-@app.on_event("startup")
-async def startup():
-    logger.info("RAG v2.0 FastAPI server starting...")
-    logger.info(f"Ollama: {OLLAMA_BASE_URL}")
-    logger.info(f"Cache: {CACHE_ROOT}")
-    init_db()
-    logger.info("Database tables initialized")
-
-
-@app.on_event("shutdown")
-async def shutdown():
-    logger.info("RAG v2.0 FastAPI server shutting down...")
-
 
 # ============================================================================
 # RUN (development only — production uses Gunicorn)
