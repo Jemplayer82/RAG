@@ -8,7 +8,7 @@ Async ingestion pipeline for RAG v2.0.
 import asyncio
 import hashlib
 import logging
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 from datetime import datetime
 
 from sentence_transformers import SentenceTransformer
@@ -218,8 +218,8 @@ def run_ingestion_job(
     title: str,
     doc_type: str,
     user_id: int,
-    document_id: int = None,
-    job_id: int = None,
+    document_id: Optional[int] = None,
+    job_id: Optional[int] = None,
     url: str = "",
     doc_id_prefix: str = "",
     crawl: bool = False,
@@ -237,6 +237,7 @@ def run_ingestion_job(
     Returns number of chunks stored.
     """
     from models import Document, IngestionJob, get_session_local
+    SessionLocal = get_session_local()  # one engine/pool per job, reused below
 
     try:
         logger.info(f"[WORKER] Starting ingestion: {title} (user={user_id}, type={doc_type})")
@@ -273,14 +274,15 @@ def run_ingestion_job(
 
         # Worker owns the truth: persist result to Postgres directly so the
         # library is correct without depending on the client polling.
-        if document_id or job_id:
-            SessionLocal = get_session_local()
+        if document_id is None and job_id is None:
+            logger.warning("[WORKER] No document_id/job_id — DB not updated for %s", title)
+        else:
             with SessionLocal() as session:
-                if document_id:
+                if document_id is not None:
                     doc = session.get(Document, document_id)
                     if doc:
                         doc.chunks = count
-                if job_id:
+                if job_id is not None:
                     job = session.get(IngestionJob, job_id)
                     if job:
                         job.status = "complete"
@@ -291,9 +293,8 @@ def run_ingestion_job(
 
     except Exception as e:
         logger.error(f"[WORKER] Ingestion failed for {title}: {e}")
-        if job_id:
+        if job_id is not None:
             try:
-                SessionLocal = get_session_local()
                 with SessionLocal() as session:
                     job = session.get(IngestionJob, job_id)
                     if job:

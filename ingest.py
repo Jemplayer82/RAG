@@ -655,6 +655,7 @@ def ingest_crawl(
     BFS-crawl from seed_url. Each visited page contributes chunks tagged
     with its actual page URL. Respects robots.txt; same-domain by default.
     """
+    _assert_url_allowed(seed_url)  # fail fast with a clear SSRF error
     seed_norm = _normalize_url(seed_url)
     rp = None
     if respect_robots and Protego is not None:

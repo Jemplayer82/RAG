@@ -62,6 +62,8 @@ def reap_stale_jobs():
             now = datetime.utcnow()
             reaped = 0
             for job in stale:
+                if job.rq_job_id == "inline":
+                    continue  # inline-fallback job; can't verify via RQ, leave it
                 if job.rq_job_id:
                     try:
                         rq_status = Job.fetch(job.rq_job_id, connection=redis_conn).get_status()

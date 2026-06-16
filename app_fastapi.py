@@ -302,6 +302,11 @@ async def register(user_data: UserCreate, db: Session = Depends(get_db)):
         is_admin = (user_data.username == admin_username)
     else:
         is_admin = (db.query(User).count() == 0)
+        if is_admin:
+            logger.warning(
+                "[AUTH] Granting admin to first registrant without ADMIN_USERNAME set — "
+                "set ADMIN_USERNAME to close the first-registration race window."
+            )
 
     user = User(
         username=user_data.username,
@@ -515,6 +520,10 @@ async def add_source(
         use_inline = True
 
     if use_inline:
+        # Mark this as an inline job so a worker restart's reaper can tell it
+        # apart from a lost RQ job (a NULL rq_job_id would otherwise be reaped).
+        job_record.rq_job_id = "inline"
+        db.commit()
         # Run in a background task. run_ingestion_job opens its OWN DB session
         # and writes Document.chunks + job status/error itself, so we hand it
         # only plain ids — never the request-scoped session or ORM objects,
