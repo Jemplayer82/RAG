@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-06-16)
 
 ## Current Position
 
-Phase: 2 of 4 (Quality Fixes)
+Phase: 3 of 4 (User Simulation & Break-Testing)
 Plan: 0 of TBD
-Status: Phase 1 complete (9 fix commits, rebuilt + runtime-validated); ready to plan Phase 2
-Last activity: 2026-06-16 — Phase 1 critical fixes done; caught + fixed NoSuchJobError at runtime rebuild
+Status: Phases 1–2 complete + review gate findings fixed; rebuilt + healthy; ready for Phase 3
+Last activity: 2026-06-16 — Phase 2 quality fixes + Phase 1 review fixes done; lifespan migration validated; native GPU Ollama reachable from container
 
-Progress: [██░░░░░░░░] 25%
+Progress: [█████░░░░░] 50%
 
 ## Performance Metrics
 
