@@ -1,5 +1,3 @@
-<img src="assets/fathom-header-banner.svg" alt="Fathom Works — rag" width="100%">
-
 <img src="assets/rag-banner.webp" alt="Fathom Works — rag" width="100%">
 
 # `$ rag`
