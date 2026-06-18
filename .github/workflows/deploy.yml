@@ -41,6 +41,12 @@ jobs:
     runs-on: [self-hosted, webserver]
 
     steps:
+      - name: Ensure data directories exist
+        run: |
+          DATA_ROOT="${DATA_ROOT:-/storage/rag}"
+          mkdir -p "$DATA_ROOT"/{postgres,qdrant,redis,uploads,ollama}
+          echo "Data dirs ready at $DATA_ROOT"
+
       - name: Deploy
         run: |
           cd /opt/rag
@@ -49,6 +55,9 @@ jobs:
           # Use only the base compose file: the override (build: . / pull_policy:
           # build) is for local dev. On the VPS we must PULL the GHCR image, not
           # build it on the box.
+          # Ensure all backing services are running (idempotent — skips healthy ones).
+          docker compose -f docker-compose.yml up -d --no-recreate postgres qdrant redis ollama
+          # Pull and hot-swap only the app containers with the new image.
           docker compose -f docker-compose.yml pull rag rag-worker
           docker compose -f docker-compose.yml up -d --no-deps rag rag-worker
           docker image prune -f
