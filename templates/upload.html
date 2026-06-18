@@ -1,155 +1,141 @@
 {% extends "base.html" %}
-
-{% block title %}Add Sources - RAG Assistant{% endblock %}
+{% block title %}Add Sources — rag{% endblock %}
 
 {% block content %}
-<div class="py-4">
-    <h2><i class="bi bi-plus-square"></i> Add Sources</h2>
-    <p class="text-muted">Upload PDF or text files, or add a web URL to your knowledge base.</p>
+<div class="rag-main rag-container--md">
 
-    <!-- Tabs -->
-    <ul class="nav nav-tabs mb-4" id="uploadTabs" role="tablist">
-        <li class="nav-item" role="presentation">
-            <button class="nav-link active" id="file-tab" data-bs-toggle="tab" data-bs-target="#file-pane" type="button" role="tab">
-                <i class="bi bi-file-earmark-arrow-up"></i> Upload File
-            </button>
-        </li>
-        <li class="nav-item" role="presentation">
-            <button class="nav-link" id="url-tab" data-bs-toggle="tab" data-bs-target="#url-pane" type="button" role="tab">
-                <i class="bi bi-link-45deg"></i> Add URL
-            </button>
-        </li>
-        <li class="nav-item" role="presentation">
-            <button class="nav-link" id="manage-tab" data-bs-toggle="tab" data-bs-target="#manage-pane" type="button" role="tab">
-                <i class="bi bi-list-ul"></i> Manage Sources
-            </button>
-        </li>
-    </ul>
+  <!-- Sub-tab strip -->
+  <nav class="fc-tabstrip" style="margin-bottom:18px;" id="uploadTabs">
+    <button class="fc-tab fc-tab--active" id="file-tab" data-tab-target="#file-pane">upload file</button>
+    <button class="fc-tab" id="url-tab"    data-tab-target="#url-pane">add url</button>
+    <button class="fc-tab" id="manage-tab" data-tab-target="#manage-pane">manage sources</button>
+  </nav>
 
-    <div class="tab-content">
-
-        <!-- Tab 1: Upload File -->
-        <div class="tab-pane fade show active" id="file-pane" role="tabpanel">
-            <div class="card" style="max-width: 640px;">
-                <div class="card-header bg-primary text-white">
-                    <h5 class="mb-0">Upload Documents</h5>
-                </div>
-                <div class="card-body">
-                    <form id="fileUploadForm">
-                        <div class="mb-3">
-                            <label for="fileInput" class="form-label">Files <span class="text-danger">*</span></label>
-                            <input type="file" class="form-control" id="fileInput" accept=".pdf,.txt,.doc,.docx" multiple required>
-                            <div class="form-text">Supported: PDF, TXT, DOC, DOCX. Select multiple files to batch-upload (each filename becomes its title).</div>
-                        </div>
-                        <div class="mb-3" id="singleTitleWrapper">
-                            <label for="fileTitleInput" class="form-label">Document Title <span class="text-danger">*</span></label>
-                            <input type="text" class="form-control" id="fileTitleInput" placeholder="e.g., Company Policy v2.3">
-                            <div class="form-text">Only used when a single file is selected.</div>
-                        </div>
-                        <button type="submit" class="btn btn-success" id="fileSubmitBtn">
-                            <i class="bi bi-cloud-upload"></i> Upload & Ingest
-                        </button>
-                    </form>
-
-                    <div id="fileProgress" class="mt-3" style="display: none;">
-                        <div class="mb-1 d-flex justify-content-between">
-                            <small id="fileProgressLabel" class="text-muted">Uploading...</small>
-                            <small id="fileProgressPct" class="text-muted">0%</small>
-                        </div>
-                        <div class="progress" style="height: 8px;">
-                            <div id="fileProgressBar" class="progress-bar progress-bar-striped progress-bar-animated"
-                                 role="progressbar" style="width: 0%"></div>
-                        </div>
-                    </div>
-                    <div id="fileSuccess" class="alert alert-success mt-3" style="display: none;"></div>
-                    <div id="fileError" class="alert alert-danger mt-3" style="display: none;"></div>
-                </div>
-            </div>
+  <!-- Tab 1: Upload File -->
+  <div id="file-pane" class="rag-tab-pane">
+    <section class="fc-panel">
+      <span class="fc-panel__title">[ upload file ]</span>
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:16px;line-height:1.7;">
+        PDF, TXT, DOC, DOCX &middot; max 50 MB &middot; ingestion runs in the background worker.<br>
+        Select multiple files for batch-upload &mdash; each filename becomes its title.
+      </div>
+      <form id="fileUploadForm">
+        <div class="fc-field" style="margin-bottom:13px;">
+          <label class="fc-field__label" for="fileInput">Files</label>
+          <input class="fc-input" type="file" id="fileInput" accept=".pdf,.txt,.doc,.docx" multiple required>
         </div>
-
-        <!-- Tab 2: Add URL -->
-        <div class="tab-pane fade" id="url-pane" role="tabpanel">
-            <div class="card" style="max-width: 640px;">
-                <div class="card-header bg-primary text-white">
-                    <h5 class="mb-0">Add Web URL</h5>
-                </div>
-                <div class="card-body">
-                    <p class="text-muted small">Works best with static HTML pages. JavaScript-rendered sites may not extract correctly.</p>
-                    <form id="urlForm">
-                        <div class="mb-3">
-                            <label for="urlInput" class="form-label">URL <span class="text-danger">*</span></label>
-                            <input type="url" class="form-control" id="urlInput" placeholder="https://example.com/document" required>
-                        </div>
-                        <div class="mb-3">
-                            <label for="urlTitleInput" class="form-label">Document Title <span class="text-danger">*</span></label>
-                            <input type="text" class="form-control" id="urlTitleInput" placeholder="e.g., Product Documentation" required>
-                        </div>
-                        <div class="form-check mb-2">
-                            <input class="form-check-input" type="checkbox" id="urlCrawlCheck">
-                            <label class="form-check-label" for="urlCrawlCheck">Crawl site (follow relevant links)</label>
-                        </div>
-                        <div id="urlCrawlOpts" class="row g-2 mb-3" style="display:none;">
-                            <div class="col-4">
-                                <label for="urlMaxDepth" class="form-label small mb-0">Max depth</label>
-                                <input type="number" class="form-control form-control-sm" id="urlMaxDepth" value="2" min="1" max="4">
-                            </div>
-                            <div class="col-4">
-                                <label for="urlMaxPages" class="form-label small mb-0">Max pages</label>
-                                <input type="number" class="form-control form-control-sm" id="urlMaxPages" value="20" min="1" max="200">
-                            </div>
-                            <div class="col-4 d-flex align-items-end">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" id="urlSameDomain" checked>
-                                    <label class="form-check-label small" for="urlSameDomain">Same domain only</label>
-                                </div>
-                            </div>
-                            <div class="col-12">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" id="urlRespectRobots">
-                                    <label class="form-check-label small text-muted" for="urlRespectRobots">Respect robots.txt (off by default — you control what to ingest)</label>
-                                </div>
-                            </div>
-                        </div>
-                        <button type="submit" class="btn btn-success" id="urlSubmitBtn">
-                            <i class="bi bi-cloud-download"></i> Fetch & Ingest
-                        </button>
-                    </form>
-
-                    <div id="urlProgress" class="mt-3" style="display: none;">
-                        <div class="mb-1 d-flex justify-content-between">
-                            <small id="urlProgressLabel" class="text-muted">Fetching...</small>
-                            <small id="urlProgressPct" class="text-muted">0%</small>
-                        </div>
-                        <div class="progress" style="height: 8px;">
-                            <div id="urlProgressBar" class="progress-bar progress-bar-striped progress-bar-animated"
-                                 role="progressbar" style="width: 0%"></div>
-                        </div>
-                    </div>
-                    <div id="urlSuccess" class="alert alert-success mt-3" style="display: none;"></div>
-                    <div id="urlError" class="alert alert-danger mt-3" style="display: none;"></div>
-                </div>
-            </div>
+        <div class="fc-field" style="margin-bottom:18px;" id="singleTitleWrapper">
+          <label class="fc-field__label" for="fileTitleInput">Document title <span style="font-size:10px;letter-spacing:0;color:var(--text-muted);">single file only</span></label>
+          <input class="fc-input" type="text" id="fileTitleInput" placeholder="e.g. Company Policy v2.3">
         </div>
-
-        <!-- Tab 3: Manage Sources -->
-        <div class="tab-pane fade" id="manage-pane" role="tabpanel">
-            <div class="card">
-                <div class="card-header bg-secondary text-white">
-                    <h5 class="mb-0">User-Added Sources</h5>
-                </div>
-                <div class="card-body">
-                    <div id="sourcesList">
-                        <p class="text-muted">Loading...</p>
-                    </div>
-                </div>
-            </div>
+        <button type="submit" class="fc-btn fc-btn--primary" id="fileSubmitBtn">Upload &amp; ingest &#8595;</button>
+      </form>
+      <div id="fileProgress" style="display:none;margin-top:16px;">
+        <div style="display:flex;justify-content:space-between;margin-bottom:6px;font-size:11px;color:var(--text-muted);">
+          <small id="fileProgressLabel">Uploading&hellip;</small>
+          <small id="fileProgressPct">0%</small>
         </div>
+        <div class="progress" style="height:6px;">
+          <div id="fileProgressBar" class="progress-bar progress-bar-striped progress-bar-animated" style="width:0%"></div>
+        </div>
+      </div>
+      <div id="fileSuccess" class="alert alert-success mt-3" style="display:none;"></div>
+      <div id="fileError"   class="alert alert-danger  mt-3" style="display:none;"></div>
+    </section>
+  </div>
 
-    </div>
+  <!-- Tab 2: Add URL -->
+  <div id="url-pane" class="rag-tab-pane" style="display:none;">
+    <section class="fc-panel">
+      <span class="fc-panel__title">[ add url ]</span>
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:16px;">Works best with static HTML. JS-rendered sites may not extract correctly.</div>
+      <form id="urlForm">
+        <div class="fc-field" style="margin-bottom:13px;">
+          <label class="fc-field__label" for="urlInput">URL</label>
+          <input class="fc-input" type="url" id="urlInput" placeholder="https://example.com/document" required>
+        </div>
+        <div class="fc-field" style="margin-bottom:13px;">
+          <label class="fc-field__label" for="urlTitleInput">Document title</label>
+          <input class="fc-input" type="text" id="urlTitleInput" placeholder="e.g. Product Documentation" required>
+        </div>
+        <label style="display:inline-flex;align-items:center;gap:8px;font-size:12px;color:var(--foam-200);cursor:pointer;margin-bottom:12px;">
+          <input type="checkbox" id="urlCrawlCheck"> Crawl site (follow relevant links)
+        </label>
+        <div id="urlCrawlOpts" style="display:none;background:var(--surface-well);border:1px solid var(--line);border-radius:var(--radius-sm);padding:14px;margin-bottom:16px;">
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">
+            <div class="fc-field">
+              <label class="fc-field__label" for="urlMaxDepth">Max depth</label>
+              <input class="fc-input" type="number" id="urlMaxDepth" value="2" min="1" max="4">
+            </div>
+            <div class="fc-field">
+              <label class="fc-field__label" for="urlMaxPages">Max pages</label>
+              <input class="fc-input" type="number" id="urlMaxPages" value="20" min="1" max="200">
+            </div>
+            <div style="display:flex;flex-direction:column;justify-content:flex-end;gap:8px;padding-bottom:4px;">
+              <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--foam-200);cursor:pointer;">
+                <input type="checkbox" id="urlSameDomain" checked> same domain only
+              </label>
+              <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-muted);cursor:pointer;">
+                <input type="checkbox" id="urlRespectRobots"> respect robots.txt
+              </label>
+            </div>
+          </div>
+        </div>
+        <button type="submit" class="fc-btn fc-btn--primary" id="urlSubmitBtn">Fetch &amp; ingest &#8595;</button>
+      </form>
+      <div style="font-size:10px;color:var(--text-muted);margin-top:10px;">URL ingestion is SSRF-guarded &mdash; internal hosts and private IPs are blocked.</div>
+      <div id="urlProgress" style="display:none;margin-top:16px;">
+        <div style="display:flex;justify-content:space-between;margin-bottom:6px;font-size:11px;color:var(--text-muted);">
+          <small id="urlProgressLabel">Fetching&hellip;</small>
+          <small id="urlProgressPct">0%</small>
+        </div>
+        <div class="progress" style="height:6px;">
+          <div id="urlProgressBar" class="progress-bar progress-bar-striped progress-bar-animated" style="width:0%"></div>
+        </div>
+      </div>
+      <div id="urlSuccess" class="alert alert-success mt-3" style="display:none;"></div>
+      <div id="urlError"   class="alert alert-danger  mt-3" style="display:none;"></div>
+    </section>
+  </div>
+
+  <!-- Tab 3: Manage Sources -->
+  <div id="manage-pane" class="rag-tab-pane" style="display:none;">
+    <section class="fc-panel">
+      <span class="fc-panel__title">[ manage sources ]</span>
+      <div id="sourcesList">
+        <div style="text-align:center;padding:20px;color:var(--text-muted);">
+          <div class="rag-spinner" style="margin:0 auto 8px;"></div>
+          <div style="font-size:12px;">Loading&hellip;</div>
+        </div>
+      </div>
+    </section>
+  </div>
+
 </div>
 {% endblock %}
 
 {% block scripts %}
+<script>
+// Vanilla JS tab switcher — dispatches shown.bs.tab for JS compatibility
+(function() {
+  function activateTab(btn) {
+    var target = btn.getAttribute('data-tab-target');
+    if (!target) return;
+    document.querySelectorAll('[data-tab-target]').forEach(function(b) {
+      b.classList.remove('fc-tab--active');
+      var pane = document.querySelector(b.getAttribute('data-tab-target'));
+      if (pane) pane.style.display = 'none';
+    });
+    btn.classList.add('fc-tab--active');
+    var pane = document.querySelector(target);
+    if (pane) pane.style.display = 'block';
+    btn.dispatchEvent(new CustomEvent('shown.bs.tab', { bubbles: true }));
+  }
+  document.querySelectorAll('[data-tab-target]').forEach(function(btn) {
+    btn.addEventListener('click', function() { activateTab(btn); });
+  });
+})();
+</script>
 <script>
 // Require admin access
 (async () => {
@@ -161,110 +147,59 @@
     if (!user.is_admin) { window.location.href = '/'; }
 })();
 
-// ---- File Upload (supports multiple files) ----
 const ALLOWED_TYPES = { pdf: 'pdf', txt: 'txt', doc: 'doc', docx: 'docx' };
 
 document.getElementById('fileUploadForm').addEventListener('submit', async (e) => {
     e.preventDefault();
-
-    const fileInput = document.getElementById('fileInput');
+    const fileInput  = document.getElementById('fileInput');
     const titleInput = document.getElementById('fileTitleInput');
     const files = Array.from(fileInput.files);
-
     if (files.length === 0) return;
-
     const submitBtn = document.getElementById('fileSubmitBtn');
     submitBtn.disabled = true;
-
     const results = { ok: 0, fail: 0, errors: [] };
-
     try {
         for (let i = 0; i < files.length; i++) {
             const file = files[i];
             const ext = file.name.split('.').pop().toLowerCase();
             const type = ALLOWED_TYPES[ext];
-
-            if (!type) {
-                results.fail += 1;
-                results.errors.push(`${file.name}: unsupported extension .${ext}`);
-                continue;
-            }
-
-            // Title: use the field only when exactly one file is selected; otherwise derive from filename.
-            const title = (files.length === 1 && titleInput.value.trim())
-                ? titleInput.value.trim()
-                : file.name.replace(/\.[^.]+$/, '');
-
+            if (!type) { results.fail++; results.errors.push(`${file.name}: unsupported extension .${ext}`); continue; }
+            const title = (files.length === 1 && titleInput.value.trim()) ? titleInput.value.trim() : file.name.replace(/\.[^.]+$/, '');
             const label = files.length > 1 ? `(${i + 1}/${files.length}) ${title}` : title;
             showStatus('file', 'progress', `Uploading ${label}...`);
             setProgress('file', 5, `Uploading ${label}...`);
-
             try {
                 const formData = new FormData();
-                formData.append('type', type);
-                formData.append('title', title);
-                formData.append('file', file);
-
-                const response = await fetch('/api/sources', {
-                    method: 'POST',
-                    headers: { 'Authorization': `Bearer ${localStorage.getItem('rag_token')}` },
-                    body: formData
-                });
-
-                if (response.status === 401) {
-                    window.location.href = '/login';
-                    return;
-                }
-
+                formData.append('type', type); formData.append('title', title); formData.append('file', file);
+                const response = await fetch('/api/sources', { method: 'POST', headers: { 'Authorization': `Bearer ${localStorage.getItem('rag_token')}` }, body: formData });
+                if (response.status === 401) { window.location.href = '/login'; return; }
                 const data = await response.json();
                 if (!response.ok) throw new Error(data.detail || 'Upload failed');
-
-                if (data.job_id) {
-                    await pollJobStatus('file', data.job_id, label);
-                }
-                results.ok += 1;
-
-            } catch (err) {
-                results.fail += 1;
-                results.errors.push(`${file.name}: ${err.message}`);
-            }
+                if (data.job_id) { await pollJobStatus('file', data.job_id, label); }
+                results.ok++;
+            } catch (err) { results.fail++; results.errors.push(`${file.name}: ${err.message}`); }
         }
-
         document.getElementById('fileUploadForm').reset();
         loadSources();
-
-        if (results.fail === 0) {
-            showStatus('file', 'success', `✓ ${results.ok} document${results.ok === 1 ? '' : 's'} added successfully.`);
-        } else {
-            showStatus('file', 'error', `${results.ok} succeeded, ${results.fail} failed:\n` + results.errors.join('\n'));
-        }
-
-    } finally {
-        submitBtn.disabled = false;
-    }
+        if (results.fail === 0) { showStatus('file', 'success', `✓ ${results.ok} document${results.ok === 1 ? '' : 's'} added successfully.`); }
+        else { showStatus('file', 'error', `${results.ok} succeeded, ${results.fail} failed:\n` + results.errors.join('\n')); }
+    } finally { submitBtn.disabled = false; }
 });
 
-// ---- URL Ingestion ----
 document.getElementById('urlCrawlCheck').addEventListener('change', (e) => {
     document.getElementById('urlCrawlOpts').style.display = e.target.checked ? '' : 'none';
 });
 
 document.getElementById('urlForm').addEventListener('submit', async (e) => {
     e.preventDefault();
-
     const url = document.getElementById('urlInput').value.trim();
     const title = document.getElementById('urlTitleInput').value.trim();
-
     if (!url || !title) return;
-
     showStatus('url', 'progress', 'Submitting URL...');
     setProgress('url', 5, 'Submitting URL...');
-
     try {
         const fd = new FormData();
-        fd.append('type', 'url');
-        fd.append('url', url);
-        fd.append('title', title);
+        fd.append('type', 'url'); fd.append('url', url); fd.append('title', title);
         const crawl = document.getElementById('urlCrawlCheck').checked;
         fd.append('crawl', crawl ? 'true' : 'false');
         if (crawl) {
@@ -273,91 +208,46 @@ document.getElementById('urlForm').addEventListener('submit', async (e) => {
             fd.append('same_domain_only', document.getElementById('urlSameDomain').checked ? 'true' : 'false');
             fd.append('respect_robots', document.getElementById('urlRespectRobots').checked ? 'true' : 'false');
         }
-        const response = await fetch('/api/sources', {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${localStorage.getItem('rag_token')}` },
-            body: fd
-        });
-
-        if (response.status === 401) {
-            window.location.href = '/login';
-            return;
-        }
-
+        const response = await fetch('/api/sources', { method: 'POST', headers: { 'Authorization': `Bearer ${localStorage.getItem('rag_token')}` }, body: fd });
+        if (response.status === 401) { window.location.href = '/login'; return; }
         const data = await response.json();
-
         if (!response.ok) throw new Error(data.detail || 'Fetch failed');
-
-        if (data.job_id) {
-            await pollJobStatus('url', data.job_id);
-        }
-
+        if (data.job_id) { await pollJobStatus('url', data.job_id); }
         document.getElementById('urlForm').reset();
         loadSources();
-
-    } catch (err) {
-        showStatus('url', 'error', err.message);
-    }
+    } catch (err) { showStatus('url', 'error', err.message); }
 });
 
-// ---- Job Polling ----
 async function pollJobStatus(prefix, jobId, label) {
     const prefixLabel = label ? `${label} — ` : '';
     showStatus(prefix, 'progress', `${prefixLabel}Queued...`);
     setProgress(prefix, 10, `${prefixLabel}Queued...`);
-
-    // Slowly animate bar to 80% while waiting
     let fakePct = 10;
     const ticker = setInterval(() => {
-        if (fakePct < 75) {
-            fakePct += Math.random() * 4;
-            setProgress(prefix, Math.round(fakePct), `${prefixLabel}Processing...`);
-        }
+        if (fakePct < 75) { fakePct += Math.random() * 4; setProgress(prefix, Math.round(fakePct), `${prefixLabel}Processing...`); }
     }, 800);
-
     return new Promise((resolve, reject) => {
         const poll = setInterval(async () => {
             try {
-                const r = await fetch(`/api/sources/jobs/${jobId}`, {
-                    headers: { 'Authorization': `Bearer ${localStorage.getItem('rag_token')}` }
-                });
-
-                if (r.status === 401) {
-                    clearInterval(poll); clearInterval(ticker);
-                    window.location.href = '/login';
-                    return;
-                }
-
+                const r = await fetch(`/api/sources/jobs/${jobId}`, { headers: { 'Authorization': `Bearer ${localStorage.getItem('rag_token')}` } });
+                if (r.status === 401) { clearInterval(poll); clearInterval(ticker); window.location.href = '/login'; return; }
                 const job = await r.json();
-
-                if (job.status === 'running') {
-                    setProgress(prefix, Math.max(fakePct, 50), `${prefixLabel}Embedding chunks...`);
-                } else if (job.status === 'complete') {
+                if (job.status === 'running') { setProgress(prefix, Math.max(fakePct, 50), `${prefixLabel}Embedding chunks...`); }
+                else if (job.status === 'complete') {
                     clearInterval(poll); clearInterval(ticker);
                     setProgress(prefix, 100, 'Complete!');
-                    // Remove animated stripe, turn green
                     const bar = document.getElementById(`${prefix}ProgressBar`);
                     bar.classList.remove('progress-bar-striped', 'progress-bar-animated');
                     bar.classList.add('bg-success');
-                    setTimeout(() => {
-                        showStatus(prefix, 'success', '✓ Document added successfully!');
-                    }, 400);
+                    setTimeout(() => showStatus(prefix, 'success', '✓ Document added successfully!'), 400);
                     resolve();
                 } else if (job.status === 'error') {
                     clearInterval(poll); clearInterval(ticker);
-                    if (job.document_id) {
-                        await fetch(`/api/sources/${job.document_id}`, {
-                            method: 'DELETE',
-                            headers: { 'Authorization': `Bearer ${localStorage.getItem('rag_token')}` }
-                        }).catch(() => {});
-                    }
+                    if (job.document_id) { await fetch(`/api/sources/${job.document_id}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${localStorage.getItem('rag_token')}` } }).catch(() => {}); }
                     showStatus(prefix, 'error', `Error: ${job.error || 'Processing failed'}`);
                     reject(new Error(job.error || 'Processing failed'));
                 }
-            } catch (err) {
-                clearInterval(poll); clearInterval(ticker);
-                reject(err);
-            }
+            } catch (err) { clearInterval(poll); clearInterval(ticker); reject(err); }
         }, 2000);
     });
 }
@@ -372,112 +262,46 @@ function showStatus(prefix, state, message) {
     const progressEl = document.getElementById(`${prefix}Progress`);
     const successEl  = document.getElementById(`${prefix}Success`);
     const errorEl    = document.getElementById(`${prefix}Error`);
-
-    if (state === 'progress') {
-        progressEl.style.display = 'block';
-        successEl.style.display  = 'none';
-        errorEl.style.display    = 'none';
-        if (message) document.getElementById(`${prefix}ProgressLabel`).textContent = message;
-    } else if (state === 'success') {
-        progressEl.style.display = 'none';
-        successEl.textContent    = message;
-        successEl.style.display  = 'block';
-        errorEl.style.display    = 'none';
-    } else if (state === 'error') {
-        progressEl.style.display = 'none';
-        errorEl.textContent      = message;
-        errorEl.style.display    = 'block';
-        successEl.style.display  = 'none';
-    }
+    if (state === 'progress') { progressEl.style.display = 'block'; successEl.style.display = 'none'; errorEl.style.display = 'none'; if (message) document.getElementById(`${prefix}ProgressLabel`).textContent = message; }
+    else if (state === 'success') { progressEl.style.display = 'none'; successEl.textContent = message; successEl.style.display = 'block'; errorEl.style.display = 'none'; }
+    else if (state === 'error')   { progressEl.style.display = 'none'; errorEl.textContent = message; errorEl.style.display = 'block'; successEl.style.display = 'none'; }
 }
 
-// ---- Manage Sources ----
 async function loadSources() {
     try {
-        const response = await fetch('/api/library', {
-            headers: { 'Authorization': `Bearer ${localStorage.getItem('rag_token')}` }
-        });
-
-        if (response.status === 401) {
-            window.location.href = '/login';
-            return;
-        }
-
+        const response = await fetch('/api/library', { headers: { 'Authorization': `Bearer ${localStorage.getItem('rag_token')}` } });
+        if (response.status === 401) { window.location.href = '/login'; return; }
         const data = await response.json();
         const container = document.getElementById('sourcesList');
-
-        if (!data.documents || data.documents.length === 0) {
-            container.innerHTML = '<p class="text-muted">No user-added sources yet.</p>';
-            return;
-        }
-
-        // Filter out failed/empty docs
+        if (!data.documents || data.documents.length === 0) { container.innerHTML = '<p style="color:var(--text-muted);font-size:12px;">No user-added sources yet.</p>'; return; }
         const validDocs = data.documents.filter(d => d.chunks > 0);
-
-        if (validDocs.length === 0) {
-            container.innerHTML = '<p class="text-muted">No user-added sources yet.</p>';
-            return;
-        }
-
+        if (validDocs.length === 0) { container.innerHTML = '<p style="color:var(--text-muted);font-size:12px;">No user-added sources yet.</p>'; return; }
         let html = '<div class="list-group">';
         for (const doc of validDocs) {
             const label = doc.title || doc.url || doc.id;
-            const badge = doc.doc_type === 'pdf' ? 'bg-primary'
-                        : doc.doc_type === 'txt' ? 'bg-success'
-                        : 'bg-warning';
-            html += `
-                <div class="list-group-item d-flex justify-content-between align-items-center">
-                    <div>
-                        <span class="badge ${badge} me-2">${doc.doc_type}</span>
-                        <strong>${label}</strong>
-                        <br>
-                        <small class="text-muted">Added ${doc.created_at ? doc.created_at.substring(0,10) : 'unknown'}</small>
-                    </div>
-                    <button class="btn btn-sm btn-outline-danger delete-source" data-id="${doc.id}">
-                        <i class="bi bi-trash"></i> Remove
-                    </button>
-                </div>
-            `;
+            const badge = doc.doc_type === 'pdf' ? 'bg-primary' : doc.doc_type === 'txt' ? 'bg-success' : 'bg-warning';
+            html += `<div class="list-group-item d-flex justify-content-between align-items-center"><div><span class="badge ${badge} me-2">${doc.doc_type}</span><strong>${label}</strong><br><small class="text-muted">Added ${doc.created_at ? doc.created_at.substring(0,10) : 'unknown'}</small></div><button class="btn btn-sm btn-outline-danger delete-source" data-id="${doc.id}">remove</button></div>`;
         }
         html += '</div>';
         container.innerHTML = html;
-
         document.querySelectorAll('.delete-source').forEach(btn => {
             btn.addEventListener('click', async () => {
                 if (!confirm('Remove this source from the knowledge base?')) return;
                 await deleteSource(btn.dataset.id);
             });
         });
-
-    } catch (err) {
-        console.error('Error loading sources:', err);
-    }
+    } catch (err) { console.error('Error loading sources:', err); }
 }
 
 async function deleteSource(id) {
     try {
-        const response = await fetch(`/api/sources/${id}`, {
-            method: 'DELETE',
-            headers: { 'Authorization': `Bearer ${localStorage.getItem('rag_token')}` }
-        });
-
-        if (response.status === 401) {
-            window.location.href = '/login';
-            return;
-        }
-
-        if (response.ok) {
-            loadSources();
-        } else {
-            const data = await response.json();
-            alert('Error: ' + (data.detail || 'Unknown error'));
-        }
-    } catch (err) {
-        alert('Error removing source: ' + err.message);
-    }
+        const response = await fetch(`/api/sources/${id}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${localStorage.getItem('rag_token')}` } });
+        if (response.status === 401) { window.location.href = '/login'; return; }
+        if (response.ok) { loadSources(); }
+        else { const data = await response.json(); alert('Error: ' + (data.detail || 'Unknown error')); }
+    } catch (err) { alert('Error removing source: ' + err.message); }
 }
 
-// Load sources when Manage tab is clicked
 document.getElementById('manage-tab').addEventListener('shown.bs.tab', loadSources);
 </script>
 {% endblock %}

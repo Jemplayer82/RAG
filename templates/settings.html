@@ -1,38 +1,33 @@
 {% extends "base.html" %}
-
-{% block title %}Settings - RAG Assistant{% endblock %}
+{% block title %}Settings — rag{% endblock %}
 
 {% block content %}
-<div class="py-4" style="max-width: 700px;">
-    <h2><i class="bi bi-gear"></i> Settings</h2>
-    <p class="text-muted">Manage your account settings.</p>
+<div class="rag-main rag-container--sm">
 
-    <!-- User Profile -->
-    <div class="card mb-4">
-        <div class="card-header bg-secondary text-white">
-            <h5 class="mb-0"><i class="bi bi-person"></i> Account</h5>
-        </div>
-        <div class="card-body">
-            <div class="mb-3">
-                <label for="usernameDisplay" class="form-label">Username</label>
-                <input type="text" class="form-control" id="usernameDisplay" name="username" autocomplete="username" readonly>
-            </div>
-            <div class="mb-3">
-                <label for="emailInput" class="form-label">Email</label>
-                <input type="email" class="form-control" id="emailInput">
-            </div>
-            <button class="btn btn-primary" id="saveProfileBtn">
-                <i class="bi bi-check-lg"></i> Save Changes
-            </button>
-            <div id="profileStatus" class="mt-3" style="display: none;"></div>
-        </div>
+  <section class="fc-panel" style="margin-bottom:18px;">
+    <span class="fc-panel__title">[ account ]</span>
+    <div style="display:flex;flex-direction:column;gap:14px;">
+      <div class="fc-field">
+        <label class="fc-field__label" for="usernameDisplay">Username</label>
+        <input class="fc-input" type="text" id="usernameDisplay" name="username"
+               autocomplete="username" readonly style="opacity:.6;cursor:default;">
+      </div>
+      <div class="fc-field">
+        <label class="fc-field__label" for="emailInput">Email</label>
+        <input class="fc-input" type="email" id="emailInput" placeholder="captain@fathomworks.local">
+      </div>
+      <div style="display:flex;align-items:center;gap:12px;">
+        <button class="fc-btn fc-btn--primary fc-btn--sm" id="saveProfileBtn">Save changes</button>
+      </div>
     </div>
+    <div id="profileStatus" style="display:none;margin-top:12px;"></div>
+  </section>
+
 </div>
 {% endblock %}
 
 {% block scripts %}
 <script>
-// Require admin access
 (async () => {
     const token = localStorage.getItem('rag_token');
     if (!token) { window.location.href = '/login'; return; }
@@ -42,67 +37,47 @@
     if (!user.is_admin) { window.location.href = '/'; }
 })();
 
-// ---- Load current settings on page load ----
-async function init() {
-    await loadSettings();
-}
+async function init() { await loadSettings(); }
 
 async function loadSettings() {
     try {
         const resp = await fetch('/api/settings', {
             headers: { 'Authorization': `Bearer ${localStorage.getItem('rag_token')}` }
         });
-        
-        if (resp.status === 401) {
-            window.location.href = '/login';
-            return;
-        }
-        
+        if (resp.status === 401) { window.location.href = '/login'; return; }
         const data = await resp.json();
         document.getElementById('usernameDisplay').value = data.username || '';
         document.getElementById('emailInput').value = data.email || '';
-    } catch (err) {
-        console.error('Error loading settings:', err);
-    }
+    } catch (err) { console.error('Error loading settings:', err); }
 }
 
-// ---- Save profile ----
 document.getElementById('saveProfileBtn').addEventListener('click', async () => {
     const email = document.getElementById('emailInput').value.trim();
-
     try {
         const resp = await fetch('/api/settings', {
             method: 'POST',
-            headers: { 
+            headers: {
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${localStorage.getItem('rag_token')}`
             },
             body: JSON.stringify({ email })
         });
-        
-        if (resp.status === 401) {
-            window.location.href = '/login';
-            return;
-        }
-        
+        if (resp.status === 401) { window.location.href = '/login'; return; }
         const data = await resp.json();
         const el = document.getElementById('profileStatus');
-        
         if (!resp.ok) {
-            el.innerHTML = `<div class="alert alert-danger">Error: ${data.detail || 'Update failed'}</div>`;
+            el.innerHTML = `<div class="alert alert-danger">! ${data.detail || 'Update failed'}</div>`;
         } else {
-            el.innerHTML = `<div class="alert alert-success">✓ Profile updated successfully.</div>`;
+            el.innerHTML = `<div class="alert alert-success">&#10003; Profile updated successfully.</div>`;
         }
         el.style.display = 'block';
-
     } catch (err) {
-        document.getElementById('profileStatus').innerHTML =
-            `<div class="alert alert-danger">Error: ${err.message}</div>`;
-        document.getElementById('profileStatus').style.display = 'block';
+        const el = document.getElementById('profileStatus');
+        el.innerHTML = `<div class="alert alert-danger">! ${err.message}</div>`;
+        el.style.display = 'block';
     }
 });
 
 init();
 </script>
 {% endblock %}
-

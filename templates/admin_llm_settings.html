@@ -1,224 +1,178 @@
 {% extends "base.html" %}
-
-{% block title %}LLM Provider Settings — Admin{% endblock %}
+{% block title %}Admin — LLM Provider — rag{% endblock %}
 
 {% block content %}
-<div class="py-4">
-  <div class="d-flex align-items-center mb-4">
-    <div>
-      <h2 class="mb-0"><i class="bi bi-cpu me-2"></i>LLM Provider Settings</h2>
-      <p class="text-muted mb-0">Configure the AI provider used by all users</p>
-    </div>
-    <span class="badge bg-danger ms-3">Admin Only</span>
-  </div>
+<div class="rag-main rag-container">
 
-  <div id="alertBox" class="alert d-none mb-4" role="alert"></div>
+  <div id="alertBox" class="d-none" role="alert" style="margin-bottom:16px;"></div>
 
-  <div class="row">
-    <div class="col-lg-7">
-      <div class="card shadow-sm">
-        <div class="card-body p-4">
-          <form id="settingsForm">
+  <div style="display:grid;grid-template-columns:1fr 300px;gap:18px;align-items:start;">
 
-            <!-- Provider -->
-            <div class="mb-4">
-              <label for="provider" class="form-label fw-semibold">AI Provider</label>
-              <select class="form-select" id="provider" name="provider" required>
-                <option value="ollama">Ollama (Local / Remote)</option>
-                <option value="openai">OpenAI (GPT-4, GPT-3.5, etc.)</option>
+    <!-- ===== Main column ===== -->
+    <div style="display:flex;flex-direction:column;gap:18px;">
+
+      <!-- LLM Provider form -->
+      <section class="fc-panel">
+        <span class="fc-panel__title">[ llm provider ]</span>
+        <form id="settingsForm">
+
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;">
+            <div class="fc-field">
+              <label class="fc-field__label" for="provider">Provider</label>
+              <select class="fc-select" id="provider" name="provider" required>
+                <option value="ollama">Ollama (local / remote)</option>
+                <option value="openai">OpenAI (GPT-4, GPT-3.5&hellip;)</option>
                 <option value="anthropic">Anthropic (Claude)</option>
-                <option value="generic">Generic HTTP (Groq, Together, Fireworks…)</option>
+                <option value="generic">Generic HTTP (Groq, Together&hellip;)</option>
               </select>
             </div>
-
-            <!-- Model -->
-            <div class="mb-4">
-              <label for="model" class="form-label fw-semibold">Model Name</label>
-              <input type="text" class="form-control" id="model" name="model" required
-                     placeholder="e.g. gpt-4o, claude-sonnet-4-6, llama3.1">
-              <div id="modelHint" class="form-text"></div>
-              <div id="installedModels" class="d-none mt-2">
-                <div class="form-text mb-1">Installed Ollama models — click to use:</div>
+            <div class="fc-field">
+              <label class="fc-field__label" for="model">Model name</label>
+              <input class="fc-input" type="text" id="model" name="model" required placeholder="e.g. llama3.1, gpt-4o, claude-sonnet-4-6">
+              <div id="modelHint" style="font-size:10px;color:var(--text-muted);margin-top:4px;"></div>
+              <div id="installedModels" class="d-none" style="margin-top:8px;">
+                <div style="font-size:10px;color:var(--text-muted);margin-bottom:6px;letter-spacing:1px;text-transform:uppercase;">Installed Ollama models &mdash; click to use</div>
                 <div id="installedModelsList" class="d-flex flex-wrap gap-1"></div>
               </div>
             </div>
+          </div>
 
-            <!-- Base URL (Ollama / Generic) -->
-            <div class="mb-4" id="baseUrlGroup">
-              <label for="baseUrl" class="form-label fw-semibold">Base URL</label>
-              <input type="text" class="form-control" id="baseUrl" name="base_url"
-                     placeholder="http://localhost:11434">
-              <div class="form-text">Endpoint for Ollama or OpenAI-compatible providers.</div>
+          <div id="baseUrlGroup" style="margin-bottom:14px;">
+            <div class="fc-field">
+              <label class="fc-field__label" for="baseUrl">Base URL</label>
+              <input class="fc-input" type="text" id="baseUrl" name="base_url" placeholder="http://localhost:11434">
             </div>
+            <div style="font-size:10px;color:var(--text-muted);margin-top:4px;">Endpoint for Ollama or OpenAI-compatible providers.</div>
+          </div>
 
-            <!-- API Key (OpenAI / Anthropic / Generic) -->
-            <div class="mb-4 d-none" id="apiKeyGroup">
-              <label for="apiKey" class="form-label fw-semibold">API Key</label>
-              <div class="input-group">
-                <input type="password" class="form-control" id="apiKey" name="api_key"
-                       autocomplete="off"
-                       placeholder="Leave blank to keep the current key">
-                <button class="btn btn-outline-secondary" type="button" id="toggleKey">
-                  <i class="bi bi-eye"></i>
-                </button>
-              </div>
-              <div class="form-text">Stored encrypted in the database.</div>
-              <div id="keyStatus" class="form-text text-success d-none">
-                <i class="bi bi-check-circle me-1"></i>An API key is already saved.
+          <div id="apiKeyGroup" style="margin-bottom:14px;" class="d-none">
+            <div class="fc-field">
+              <label class="fc-field__label" for="apiKey">API key &middot; Fernet-encrypted</label>
+              <div style="display:flex;gap:8px;">
+                <input class="fc-input" type="password" id="apiKey" name="api_key" autocomplete="off" placeholder="Leave blank to keep the current key" style="flex:1;">
+                <button class="fc-btn fc-btn--ghost fc-btn--sm" type="button" id="toggleKey" style="flex-shrink:0;">show</button>
               </div>
             </div>
+            <div id="keyStatus" class="d-none" style="font-size:11px;color:var(--buy-2);margin-top:6px;">&#10003; An API key is already saved.</div>
+          </div>
 
-            <hr class="my-4">
-
-            <!-- Tuning parameters -->
-            <div class="row g-3 mb-4">
-              <div class="col-md-4">
-                <label for="temperature" class="form-label fw-semibold">Temperature</label>
-                <input type="number" class="form-control" id="temperature" name="temperature"
-                       value="0.3" min="0" max="2" step="0.05">
-                <div class="form-text">0 = deterministic, 2 = creative</div>
-              </div>
-              <div class="col-md-4">
-                <label for="topP" class="form-label fw-semibold">Top P</label>
-                <input type="number" class="form-control" id="topP" name="top_p"
-                       value="0.9" min="0" max="1" step="0.05">
-              </div>
-              <div class="col-md-4">
-                <label for="maxTokens" class="form-label fw-semibold">Max Tokens</label>
-                <input type="number" class="form-control" id="maxTokens" name="max_tokens"
-                       value="2048" min="256" max="32000" step="256">
-              </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:18px;padding-top:14px;border-top:1px solid var(--line);">
+            <div class="fc-field">
+              <label class="fc-field__label" for="temperature">Temperature</label>
+              <input class="fc-input" type="number" id="temperature" name="temperature" value="0.3" min="0" max="2" step="0.05">
+              <div style="font-size:10px;color:var(--text-muted);margin-top:3px;">0 = deterministic</div>
             </div>
-
-            <div class="d-flex gap-2">
-              <button type="submit" class="btn btn-primary px-4">
-                <i class="bi bi-save me-1"></i>Save Settings
-              </button>
-              <button type="button" class="btn btn-outline-secondary" id="testBtn">
-                <i class="bi bi-lightning me-1"></i>Test Connection
-              </button>
+            <div class="fc-field">
+              <label class="fc-field__label" for="topP">Top P</label>
+              <input class="fc-input" type="number" id="topP" name="top_p" value="0.9" min="0" max="1" step="0.05">
             </div>
+            <div class="fc-field">
+              <label class="fc-field__label" for="maxTokens">Max tokens</label>
+              <input class="fc-input" type="number" id="maxTokens" name="max_tokens" value="2048" min="256" max="32000" step="256">
+            </div>
+          </div>
 
-          </form>
+          <div style="display:flex;gap:10px;align-items:center;">
+            <button type="submit" class="fc-btn fc-btn--primary">Save settings</button>
+            <button type="button" class="fc-btn fc-btn--ghost" id="testBtn">Test connection</button>
+            <span id="connStatus" style="margin-left:auto;font-size:12px;"></span>
+          </div>
+
+        </form>
+      </section>
+
+      <!-- Ollama Model Management -->
+      <section class="fc-panel d-none" id="ollamaCard">
+        <span class="fc-panel__title">[ ollama models ]</span>
+        <div style="font-size:12px;color:var(--text-muted);margin-bottom:16px;">Manage models inside the local Ollama container.</div>
+
+        <div class="fc-field" style="margin-bottom:12px;">
+          <label class="fc-field__label" for="pullModelName">Pull a new model</label>
+          <div style="display:flex;gap:8px;">
+            <input class="fc-input" type="text" id="pullModelName" autocomplete="off"
+                   placeholder="e.g. llama3.1, gemma2:2b, qwen2.5:7b" style="flex:1;">
+            <button class="fc-btn fc-btn--primary" type="button" id="pullBtn">Pull &#8595;</button>
+          </div>
+          <div style="font-size:10px;color:var(--text-muted);margin-top:4px;">
+            Browse models at <a href="https://ollama.com/library" target="_blank">ollama.com/library</a>.
+          </div>
         </div>
-      </div>
 
-      <!-- Ollama Model Management (visible only when provider=ollama) -->
-      <div class="card shadow-sm mt-4 d-none" id="ollamaCard">
-        <div class="card-body p-4">
-          <h5 class="fw-semibold mb-1"><i class="bi bi-cloud-download me-2"></i>Ollama Models</h5>
-          <p class="text-muted small mb-3">Manage models inside the local Ollama container.</p>
-
-          <div class="mb-3">
-            <label for="pullModelName" class="form-label fw-semibold small">Pull a new model</label>
-            <div class="input-group">
-              <input type="text" class="form-control" id="pullModelName"
-                     autocomplete="off"
-                     placeholder="e.g. llama3.1, gemma2:2b, qwen2.5:7b">
-              <button class="btn btn-primary" type="button" id="pullBtn">
-                <i class="bi bi-download me-1"></i>Pull
-              </button>
-            </div>
-            <div class="form-text">Browse available models at <a href="https://ollama.com/library" target="_blank">ollama.com/library</a>.</div>
+        <div id="pullProgress" class="d-none" style="margin-bottom:12px;">
+          <div class="progress" style="height:6px;margin-bottom:6px;">
+            <div id="pullProgressBar" class="progress-bar progress-bar-striped progress-bar-animated" style="width:0%"></div>
           </div>
-
-          <div id="pullProgress" class="d-none">
-            <div class="progress mb-2" style="height: 1.25rem;">
-              <div id="pullProgressBar" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%"></div>
-            </div>
-            <div id="pullStatus" class="form-text"></div>
-          </div>
-
-          <hr class="my-3">
-
-          <div class="d-flex justify-content-between align-items-center mb-2">
-            <span class="form-label fw-semibold small mb-0">Installed models</span>
-            <button type="button" class="btn btn-sm btn-outline-secondary" id="refreshModelsBtn">
-              <i class="bi bi-arrow-clockwise"></i>
-            </button>
-          </div>
-          <div id="ollamaModelsTable"></div>
+          <div id="pullStatus" style="font-size:11px;color:var(--text-muted);"></div>
         </div>
-      </div>
 
-      <!-- Compute Device Card -->
-      <div class="card shadow-sm mt-4">
-        <div class="card-body p-4">
-          <h5 class="fw-semibold mb-1"><i class="bi bi-gpu-card me-2"></i>Embedding Compute Device</h5>
-          <p class="text-muted small mb-3">Controls which hardware runs the embedding model. Requires app restart to take effect.</p>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;padding-top:12px;border-top:1px solid var(--line);">
+          <span style="font-size:10px;letter-spacing:1px;color:var(--text-muted);text-transform:uppercase;">Installed models</span>
+          <button class="fc-btn fc-btn--ghost fc-btn--sm" type="button" id="refreshModelsBtn">&#8635; refresh</button>
+        </div>
+        <div id="ollamaModelsTable"></div>
+      </section>
 
-          <div class="mb-3">
-            <label for="embedDevice" class="form-label fw-semibold">Device</label>
-            <select class="form-select" id="embedDevice">
-              <option value="cpu">CPU</option>
-              <option value="cuda">CUDA (NVIDIA GPU)</option>
-              <option value="rocm">ROCm (AMD GPU)</option>
-            </select>
-          </div>
+      <!-- Compute device -->
+      <section class="fc-panel">
+        <span class="fc-panel__title">[ embedding device ]</span>
+        <div style="font-size:12px;color:var(--text-muted);margin-bottom:16px;line-height:1.7;">
+          Controls which hardware runs the embedding model. Requires app restart to take effect.
+        </div>
 
-          <!-- PyTorch install command -->
-          <div id="torchInstallBox" class="d-none">
-            <label for="torchCmd" class="form-label fw-semibold">Required PyTorch Install Command</label>
-            <div class="input-group mb-1">
-              <input type="text" class="form-control font-monospace small" id="torchCmd" readonly>
-              <button class="btn btn-outline-secondary" type="button" id="copyTorchCmd">
-                <i class="bi bi-clipboard"></i>
-              </button>
+        <div class="fc-field" style="margin-bottom:14px;">
+          <label class="fc-field__label" for="embedDevice">Device</label>
+          <select class="fc-select" id="embedDevice" style="max-width:280px;">
+            <option value="cpu">CPU</option>
+            <option value="cuda">CUDA (NVIDIA GPU)</option>
+            <option value="rocm">ROCm (AMD GPU)</option>
+          </select>
+        </div>
+
+        <div id="torchInstallBox" class="d-none" style="margin-bottom:14px;">
+          <div class="fc-field">
+            <label class="fc-field__label" for="torchCmd">Required PyTorch install command</label>
+            <div style="display:flex;gap:8px;">
+              <input class="fc-input" type="text" id="torchCmd" readonly style="flex:1;font-family:var(--font-mono);font-size:11px;">
+              <button class="fc-btn fc-btn--ghost fc-btn--sm" type="button" id="copyTorchCmd" style="flex-shrink:0;">copy</button>
             </div>
-            <div class="form-text">Run this in your terminal after saving, then restart the app.</div>
           </div>
+          <div style="font-size:10px;color:var(--text-muted);margin-top:4px;">Run this after saving, then restart the app.</div>
+        </div>
 
-          <button class="btn btn-primary mt-3" id="saveDeviceBtn">
-            <i class="bi bi-save me-1"></i>Save Device
-          </button>
-          <div id="deviceAlert" class="alert d-none mt-3"></div>
-        </div>
-      </div>
-        </div>
-      </div>
+        <button class="fc-btn fc-btn--primary" id="saveDeviceBtn">Save device</button>
+        <div id="deviceAlert" class="d-none" style="margin-top:12px;"></div>
+      </section>
+
     </div>
 
-    <!-- Info sidebar -->
-    <div class="col-lg-4 mt-4 mt-lg-0">
-      <div class="card shadow-sm mb-3">
-        <div class="card-header fw-semibold"><i class="bi bi-info-circle me-1"></i>Model Suggestions</div>
-        <div class="card-body small">
-          <p class="mb-1"><strong>OpenAI</strong></p>
-          <ul class="mb-2">
-            <li>gpt-4o</li>
-            <li>gpt-4-turbo</li>
-            <li>gpt-3.5-turbo</li>
-          </ul>
-          <p class="mb-1"><strong>Anthropic</strong></p>
-          <ul class="mb-2">
-            <li>claude-opus-4-7</li>
-            <li>claude-sonnet-4-6</li>
-            <li>claude-haiku-4-5-20251001</li>
-          </ul>
-          <p class="mb-1"><strong>Ollama</strong></p>
-          <ul class="mb-2">
-            <li>mistral-small3.1</li>
-            <li>llama3.1</li>
-            <li>gemma2</li>
-          </ul>
-          <p class="mb-1"><strong>Groq (Generic)</strong></p>
-          <ul class="mb-0">
-            <li>Base URL: https://api.groq.com/openai/v1/chat/completions</li>
-            <li>llama-3.1-70b-versatile</li>
-          </ul>
-        </div>
-      </div>
+    <!-- ===== Sidebar ===== -->
+    <div style="display:flex;flex-direction:column;gap:14px;">
 
-      <div class="card shadow-sm">
-        <div class="card-header fw-semibold"><i class="bi bi-shield-lock me-1"></i>Security</div>
-        <div class="card-body small text-muted">
-          API keys are encrypted with Fernet symmetric encryption before being stored in the database.
-          Set <code>ENCRYPTION_KEY</code> in your <code>.env</code> to a stable 44-character Fernet key.
-          Generate one with:
-          <pre class="mt-2 mb-0 p-2 bg-light rounded">python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"</pre>
+      <section class="fc-panel">
+        <span class="fc-panel__title">[ model suggestions ]</span>
+        <div style="font-size:12px;line-height:1.7;color:var(--text-muted);">
+          <div style="color:var(--foam-200);margin-bottom:2px;font-size:11px;letter-spacing:1px;text-transform:uppercase;">OpenAI</div>
+          gpt-4o &middot; gpt-4-turbo &middot; gpt-3.5-turbo
+          <div style="color:var(--foam-200);margin-top:10px;margin-bottom:2px;font-size:11px;letter-spacing:1px;text-transform:uppercase;">Anthropic</div>
+          claude-opus-4-7 &middot; claude-sonnet-4-6 &middot; claude-haiku-4-5-20251001
+          <div style="color:var(--foam-200);margin-top:10px;margin-bottom:2px;font-size:11px;letter-spacing:1px;text-transform:uppercase;">Ollama</div>
+          mistral-small3.1 &middot; llama3.1 &middot; gemma2
+          <div style="color:var(--foam-200);margin-top:10px;margin-bottom:2px;font-size:11px;letter-spacing:1px;text-transform:uppercase;">Groq (generic)</div>
+          <span style="font-size:11px;">Base URL: https://api.groq.com/openai/v1/chat/completions<br>llama-3.1-70b-versatile</span>
         </div>
-      </div>
+      </section>
+
+      <section class="fc-panel">
+        <span class="fc-panel__title">[ security ]</span>
+        <div style="font-size:12px;color:var(--text-muted);line-height:1.7;">
+          API keys are encrypted with Fernet symmetric encryption before being stored in the database.<br>
+          Set <code>ENCRYPTION_KEY</code> in your <code>.env</code> to a stable 44-char Fernet key. Generate with:
+        </div>
+        <pre style="margin-top:10px;font-size:10px;">python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"</pre>
+      </section>
+
     </div>
+
   </div>
 </div>
 
@@ -238,7 +192,7 @@ const MODEL_HINTS = {
   openai:    'e.g. gpt-4o, gpt-4-turbo, gpt-3.5-turbo',
   anthropic: 'e.g. claude-opus-4-7, claude-sonnet-4-6, claude-haiku-4-5-20251001',
   ollama:    'e.g. mistral-small3.1, llama3.1, gemma2',
-  generic:   'Model name passed to your provider\'s API',
+  generic:   "Model name passed to your provider's API",
 };
 
 function updateFieldVisibility() {
@@ -246,7 +200,6 @@ function updateFieldVisibility() {
   baseUrlGroup.classList.toggle('d-none', p === 'openai' || p === 'anthropic');
   apiKeyGroup.classList.toggle('d-none', false);
   modelHint.textContent = MODEL_HINTS[p] || '';
-
   const isOllama = p === 'ollama';
   document.getElementById('ollamaCard').classList.toggle('d-none', !isOllama);
   document.getElementById('installedModels').classList.toggle('d-none', !isOllama);
@@ -255,21 +208,16 @@ function updateFieldVisibility() {
 
 providerEl.addEventListener('change', updateFieldVisibility);
 
-// Toggle API key visibility
 document.getElementById('toggleKey').addEventListener('click', () => {
   const input = document.getElementById('apiKey');
-  const icon  = document.querySelector('#toggleKey i');
-  if (input.type === 'password') {
-    input.type = 'text';
-    icon.className = 'bi bi-eye-slash';
-  } else {
-    input.type = 'password';
-    icon.className = 'bi bi-eye';
-  }
+  const btn   = document.getElementById('toggleKey');
+  if (input.type === 'password') { input.type = 'text'; btn.textContent = 'hide'; }
+  else { input.type = 'password'; btn.textContent = 'show'; }
 });
 
 function showAlert(msg, type = 'success') {
-  alertBox.className = `alert alert-${type}`;
+  const typeMap = { success: 'alert alert-success', danger: 'alert alert-danger', info: 'alert alert-info', warning: 'alert alert-warning' };
+  alertBox.className = typeMap[type] || 'alert alert-info';
   alertBox.textContent = msg;
   alertBox.classList.remove('d-none');
   setTimeout(() => alertBox.classList.add('d-none'), 5000);
@@ -277,90 +225,42 @@ function showAlert(msg, type = 'success') {
 
 async function loadSettings() {
   try {
-    const resp = await fetch('/api/admin/llm-settings', {
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
-    if (resp.status === 403) {
-      document.body.innerHTML = '<div class="container py-5"><div class="alert alert-danger">Access denied — admin only.</div></div>';
-      return;
-    }
+    const resp = await fetch('/api/admin/llm-settings', { headers: { 'Authorization': `Bearer ${token}` } });
+    if (resp.status === 403) { document.body.innerHTML = '<div style="padding:40px;color:var(--sell);">Access denied — admin only.</div>'; return; }
     if (!resp.ok) return;
     const data = await resp.json();
-
     providerEl.value = data.provider || 'ollama';
     modelEl.value    = data.model    || '';
     document.getElementById('baseUrl').value     = data.base_url   || '';
     document.getElementById('temperature').value = data.temperature ?? 0.3;
     document.getElementById('topP').value        = data.top_p       ?? 0.9;
     document.getElementById('maxTokens').value   = data.max_tokens  ?? 2048;
-
     if (data.has_api_key) keyStatus.classList.remove('d-none');
     updateFieldVisibility();
-  } catch (err) {
-    console.error('Failed to load settings:', err);
-  }
+  } catch (err) { console.error('Failed to load settings:', err); }
 }
 
 document.getElementById('settingsForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const fd = new FormData(e.target);
-  const body = {
-    provider:    fd.get('provider'),
-    model:       fd.get('model'),
-    base_url:    fd.get('base_url') || null,
-    temperature: parseFloat(fd.get('temperature')),
-    top_p:       parseFloat(fd.get('top_p')),
-    max_tokens:  parseInt(fd.get('max_tokens')),
-  };
+  const body = { provider: fd.get('provider'), model: fd.get('model'), base_url: fd.get('base_url') || null, temperature: parseFloat(fd.get('temperature')), top_p: parseFloat(fd.get('top_p')), max_tokens: parseInt(fd.get('max_tokens')) };
   const apiKey = fd.get('api_key');
   if (apiKey) body.api_key = apiKey;
-
-  const resp = await fetch('/api/admin/llm-settings', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(body),
-  });
-
-  if (resp.ok) {
-    showAlert('Settings saved successfully.');
-    loadSettings();
-  } else {
-    const err = await resp.json().catch(() => ({}));
-    showAlert(err.detail || 'Error saving settings.', 'danger');
-  }
+  const resp = await fetch('/api/admin/llm-settings', { method: 'POST', headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  if (resp.ok) { showAlert('Settings saved successfully.'); loadSettings(); }
+  else { const err = await resp.json().catch(() => ({})); showAlert(err.detail || 'Error saving settings.', 'danger'); }
 });
 
 document.getElementById('testBtn').addEventListener('click', async () => {
   const fd = new FormData(document.getElementById('settingsForm'));
-  const body = {
-    provider:    fd.get('provider'),
-    model:       fd.get('model'),
-    base_url:    fd.get('base_url') || null,
-    temperature: parseFloat(fd.get('temperature')) || 0.3,
-    top_p:       parseFloat(fd.get('top_p')) || 0.9,
-    max_tokens:  parseInt(fd.get('max_tokens')) || 2048,
-  };
+  const body = { provider: fd.get('provider'), model: fd.get('model'), base_url: fd.get('base_url') || null, temperature: parseFloat(fd.get('temperature')) || 0.3, top_p: parseFloat(fd.get('top_p')) || 0.9, max_tokens: parseInt(fd.get('max_tokens')) || 2048 };
   const apiKey = fd.get('api_key');
   if (apiKey) body.api_key = apiKey;
-
-  showAlert('Testing connection…', 'info');
-  const resp = await fetch('/api/admin/llm-settings/test', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(body),
-  });
+  showAlert('Testing connection\u2026', 'info');
+  const resp = await fetch('/api/admin/llm-settings/test', { method: 'POST', headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   const data = await resp.json().catch(() => ({}));
-  if (resp.ok) {
-    showAlert(`Connection OK — response: "${data.response}"`, 'success');
-  } else {
-    showAlert(data.detail || 'Connection test failed.', 'danger');
-  }
+  if (resp.ok) { showAlert(`Connection OK \u2014 response: "${data.response}"`, 'success'); }
+  else { showAlert(data.detail || 'Connection test failed.', 'danger'); }
 });
 
 loadSettings();
@@ -373,67 +273,37 @@ function formatSize(bytes) {
   if (!bytes) return '';
   const gb = bytes / (1024 ** 3);
   if (gb >= 1) return gb.toFixed(1) + ' GB';
-  const mb = bytes / (1024 ** 2);
-  return mb.toFixed(0) + ' MB';
+  return (bytes / (1024 ** 2)).toFixed(0) + ' MB';
 }
 
 async function refreshOllamaModels() {
   try {
-    const resp = await fetch('/api/admin/ollama/models', {
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
+    const resp = await fetch('/api/admin/ollama/models', { headers: { 'Authorization': `Bearer ${token}` } });
     if (!resp.ok) {
       const err = await resp.json().catch(() => ({}));
-      ollamaModelsTable.innerHTML = `<div class="alert alert-warning small mb-0">${err.detail || 'Cannot reach Ollama.'}</div>`;
+      ollamaModelsTable.innerHTML = `<div class="alert alert-warning">${err.detail || 'Cannot reach Ollama.'}</div>`;
       installedModelsList.innerHTML = '';
       return;
     }
     const data = await resp.json();
     const models = data.models || [];
     if (models.length === 0) {
-      ollamaModelsTable.innerHTML = '<div class="text-muted small">No models installed yet. Pull one above to get started.</div>';
-      installedModelsList.innerHTML = '<span class="text-muted small">None installed</span>';
+      ollamaModelsTable.innerHTML = '<div style="font-size:12px;color:var(--text-muted);">No models installed yet. Pull one above to get started.</div>';
+      installedModelsList.innerHTML = '<span style="font-size:11px;color:var(--text-muted);">None installed</span>';
       return;
     }
-    ollamaModelsTable.innerHTML = `
-      <table class="table table-sm mb-0">
-        <tbody>
-          ${models.map(m => `
-            <tr>
-              <td class="align-middle"><code>${m.name}</code></td>
-              <td class="align-middle text-muted small">${formatSize(m.size)}</td>
-              <td class="align-middle text-end">
-                <button class="btn btn-sm btn-outline-primary use-model-btn" data-name="${m.name}">Use</button>
-                <button class="btn btn-sm btn-outline-danger delete-model-btn" data-name="${m.name}" title="Delete">
-                  <i class="bi bi-trash"></i>
-                </button>
-              </td>
-            </tr>
-          `).join('')}
-        </tbody>
-      </table>
-    `;
-    installedModelsList.innerHTML = models.map(m =>
-      `<button type="button" class="btn btn-sm btn-outline-secondary use-model-btn" data-name="${m.name}">${m.name}</button>`
-    ).join('');
-
-    document.querySelectorAll('.use-model-btn').forEach(btn => {
-      btn.addEventListener('click', () => { modelEl.value = btn.dataset.name; });
-    });
+    ollamaModelsTable.innerHTML = `<table class="table table-sm mb-0"><tbody>${models.map(m => `<tr><td class="align-items-center"><code>${m.name}</code></td><td style="color:var(--text-muted);font-size:11px;">${formatSize(m.size)}</td><td style="text-align:right;"><button class="btn btn-sm btn-outline-primary use-model-btn" data-name="${m.name}">use</button> <button class="btn btn-sm btn-outline-danger delete-model-btn" data-name="${m.name}">del</button></td></tr>`).join('')}</tbody></table>`;
+    installedModelsList.innerHTML = models.map(m => `<button type="button" class="btn btn-sm btn-outline-secondary use-model-btn" data-name="${m.name}">${m.name}</button>`).join('');
+    document.querySelectorAll('.use-model-btn').forEach(btn => { btn.addEventListener('click', () => { modelEl.value = btn.dataset.name; }); });
     document.querySelectorAll('.delete-model-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
         if (!confirm(`Delete model "${btn.dataset.name}"?`)) return;
-        const r = await fetch(`/api/admin/ollama/models/${encodeURIComponent(btn.dataset.name)}`, {
-          method: 'DELETE',
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
+        const r = await fetch(`/api/admin/ollama/models/${encodeURIComponent(btn.dataset.name)}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } });
         if (r.ok) refreshOllamaModels();
         else showAlert((await r.json().catch(() => ({}))).detail || 'Delete failed.', 'danger');
       });
     });
-  } catch (err) {
-    ollamaModelsTable.innerHTML = `<div class="alert alert-warning small mb-0">${err.message}</div>`;
-  }
+  } catch (err) { ollamaModelsTable.innerHTML = `<div class="alert alert-warning">${err.message}</div>`; }
 }
 
 document.getElementById('refreshModelsBtn').addEventListener('click', refreshOllamaModels);
@@ -441,124 +311,61 @@ document.getElementById('refreshModelsBtn').addEventListener('click', refreshOll
 document.getElementById('pullBtn').addEventListener('click', async () => {
   const name = document.getElementById('pullModelName').value.trim();
   if (!name) return;
-
   const progressWrap = document.getElementById('pullProgress');
   const progressBar  = document.getElementById('pullProgressBar');
   const statusEl     = document.getElementById('pullStatus');
   progressWrap.classList.remove('d-none');
   progressBar.style.width = '0%';
   progressBar.classList.remove('bg-success', 'bg-danger');
-  statusEl.textContent = 'Starting…';
-
+  statusEl.textContent = 'Starting\u2026';
   try {
-    const resp = await fetch('/api/admin/ollama/pull', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name })
-    });
-    if (!resp.ok || !resp.body) {
-      statusEl.textContent = 'Pull failed to start.';
-      progressBar.classList.add('bg-danger');
-      return;
-    }
-
-    const reader  = resp.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-
+    const resp = await fetch('/api/admin/ollama/pull', { method: 'POST', headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
+    if (!resp.ok || !resp.body) { statusEl.textContent = 'Pull failed to start.'; progressBar.classList.add('bg-danger'); return; }
+    const reader = resp.body.getReader(); const decoder = new TextDecoder(); let buffer = '';
     while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
+      const { done, value } = await reader.read(); if (done) break;
       buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop();
+      const lines = buffer.split('\n'); buffer = lines.pop();
       for (const line of lines) {
         if (!line.trim()) continue;
-        let evt;
-        try { evt = JSON.parse(line); } catch { continue; }
-        if (evt.error) {
-          statusEl.textContent = `Error: ${evt.error}`;
-          progressBar.classList.add('bg-danger');
-          return;
-        }
-        if (evt.total && evt.completed != null) {
-          const pct = Math.min(100, Math.round((evt.completed / evt.total) * 100));
-          progressBar.style.width = pct + '%';
-          progressBar.textContent = pct + '%';
-        }
+        let evt; try { evt = JSON.parse(line); } catch { continue; }
+        if (evt.error) { statusEl.textContent = `Error: ${evt.error}`; progressBar.classList.add('bg-danger'); return; }
+        if (evt.total && evt.completed != null) { const pct = Math.min(100, Math.round((evt.completed / evt.total) * 100)); progressBar.style.width = pct + '%'; progressBar.textContent = pct + '%'; }
         if (evt.status) statusEl.textContent = evt.status;
       }
     }
-
-    progressBar.style.width = '100%';
-    progressBar.textContent = 'Done';
-    progressBar.classList.add('bg-success');
-    statusEl.textContent = `Pulled ${name}.`;
-    document.getElementById('pullModelName').value = '';
-    modelEl.value = name;
-    refreshOllamaModels();
-  } catch (err) {
-    statusEl.textContent = `Error: ${err.message}`;
-    progressBar.classList.add('bg-danger');
-  }
+    progressBar.style.width = '100%'; progressBar.textContent = 'Done'; progressBar.classList.add('bg-success');
+    statusEl.textContent = `Pulled ${name}.`; document.getElementById('pullModelName').value = ''; modelEl.value = name; refreshOllamaModels();
+  } catch (err) { statusEl.textContent = `Error: ${err.message}`; progressBar.classList.add('bg-danger'); }
 });
 
 // ---- Compute Device ----
-const TORCH_CMDS = {
-  cuda: 'pip install torch --index-url https://download.pytorch.org/whl/cu124',
-  rocm: 'pip install torch --index-url https://download.pytorch.org/whl/rocm6.1',
-  cpu:  'pip install torch',
-};
-
-const embedDeviceEl   = document.getElementById('embedDevice');
-const torchInstallBox = document.getElementById('torchInstallBox');
-const torchCmdEl      = document.getElementById('torchCmd');
-const deviceAlertEl   = document.getElementById('deviceAlert');
-
+const TORCH_CMDS = { cuda: 'pip install torch --index-url https://download.pytorch.org/whl/cu124', rocm: 'pip install torch --index-url https://download.pytorch.org/whl/rocm6.1', cpu: 'pip install torch' };
+const embedDeviceEl = document.getElementById('embedDevice');
 function updateTorchCmd() {
   const dev = embedDeviceEl.value;
-  if (dev === 'cpu') {
-    torchInstallBox.classList.add('d-none');
-  } else {
-    torchInstallBox.classList.remove('d-none');
-    torchCmdEl.value = TORCH_CMDS[dev];
-  }
+  document.getElementById('torchInstallBox').classList.toggle('d-none', dev === 'cpu');
+  if (dev !== 'cpu') document.getElementById('torchCmd').value = TORCH_CMDS[dev];
 }
-
 embedDeviceEl.addEventListener('change', updateTorchCmd);
-
 document.getElementById('copyTorchCmd').addEventListener('click', () => {
-  navigator.clipboard.writeText(torchCmdEl.value);
-  document.getElementById('copyTorchCmd').innerHTML = '<i class="bi bi-check"></i>';
-  setTimeout(() => document.getElementById('copyTorchCmd').innerHTML = '<i class="bi bi-clipboard"></i>', 1500);
+  navigator.clipboard.writeText(document.getElementById('torchCmd').value);
+  const btn = document.getElementById('copyTorchCmd'); btn.textContent = 'copied!';
+  setTimeout(() => { btn.textContent = 'copy'; }, 1500);
 });
-
 async function loadDevice() {
-  const resp = await fetch('/api/admin/embed-device', {
-    headers: { 'Authorization': `Bearer ${token}` }
-  });
-  if (resp.ok) {
-    const data = await resp.json();
-    embedDeviceEl.value = data.embed_device || 'cpu';
-    updateTorchCmd();
-  }
+  const resp = await fetch('/api/admin/embed-device', { headers: { 'Authorization': `Bearer ${token}` } });
+  if (resp.ok) { const data = await resp.json(); embedDeviceEl.value = data.embed_device || 'cpu'; updateTorchCmd(); }
 }
-
 document.getElementById('saveDeviceBtn').addEventListener('click', async () => {
-  const resp = await fetch('/api/admin/embed-device', {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ embed_device: embedDeviceEl.value }),
-  });
+  const resp = await fetch('/api/admin/embed-device', { method: 'POST', headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ embed_device: embedDeviceEl.value }) });
   const data = await resp.json().catch(() => ({}));
-  deviceAlertEl.className = resp.ok ? 'alert alert-success mt-3' : 'alert alert-danger mt-3';
-  deviceAlertEl.textContent = resp.ok
-    ? `✓ Device set to ${embedDeviceEl.value}. Restart the app to apply.`
-    : (data.detail || 'Error saving device.');
-  deviceAlertEl.classList.remove('d-none');
-  setTimeout(() => deviceAlertEl.classList.add('d-none'), 6000);
+  const el = document.getElementById('deviceAlert');
+  el.className = resp.ok ? 'alert alert-success' : 'alert alert-danger';
+  el.textContent = resp.ok ? `\u2713 Device set to ${embedDeviceEl.value}. Restart the app to apply.` : (data.detail || 'Error saving device.');
+  el.classList.remove('d-none');
+  setTimeout(() => el.classList.add('d-none'), 6000);
 });
-
 loadDevice();
 </script>
 {% endblock %}

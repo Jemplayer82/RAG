@@ -1,63 +1,114 @@
-{% extends "base.html" %}
-{% block title %}Register - RAG Assistant{% endblock %}
-{% block content %}
-<div class="row justify-content-center mt-5">
-    <div class="col-md-4">
-        <div class="card shadow">
-            <div class="card-header bg-success text-white">
-                <h5 class="mb-0"><i class="bi bi-person-plus"></i> Create Account</h5>
-            </div>
-            <div class="card-body">
-                <form id="registerForm">
-                    <div class="mb-3">
-                        <label for="username" class="form-label">Username</label>
-                        <input type="text" class="form-control" id="username" name="username" autocomplete="username" required autofocus>
-                    </div>
-                    <div class="mb-3">
-                        <label for="email" class="form-label">Email</label>
-                        <input type="email" class="form-control" id="email" name="email" autocomplete="email" required>
-                    </div>
-                    <div class="mb-3">
-                        <label for="password" class="form-label">Password</label>
-                        <input type="password" class="form-control" id="password" name="password" autocomplete="new-password" required minlength="8">
-                    </div>
-                    <button type="submit" class="btn btn-success w-100">Create Account</button>
-                </form>
-                <div id="registerError" class="alert alert-danger mt-3" style="display:none;"></div>
-                <div id="registerSuccess" class="alert alert-success mt-3" style="display:none;"></div>
-                <hr>
-                <p class="text-center mb-0">Already registered? <a href="/login">Login</a></p>
-            </div>
-        </div>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Register — rag</title>
+  <link rel="stylesheet" href="/static/fathom.css">
+</head>
+<body style="margin:0;padding:0;">
+
+<div class="rag-auth-page">
+
+  <!-- Ambient sonar rings -->
+  <div class="rag-auth-rings">
+    <div class="rag-auth-ring"></div>
+    <div class="rag-auth-ring"></div>
+    <div class="rag-auth-ring"></div>
+  </div>
+  <div class="rag-auth-grid"></div>
+
+  <div class="rag-auth-inner">
+
+    <!-- Brand -->
+    <div class="rag-auth-brand">
+      <svg width="38" height="48" viewBox="0 0 60 72" fill="none">
+        <g transform="translate(0,4)">
+          <line x1="8"  y1="4"  x2="52" y2="4"  stroke="#cce8f4" stroke-width="1.5" opacity="0.35" stroke-linecap="round"/>
+          <line x1="14" y1="9"  x2="46" y2="9"  stroke="#cce8f4" stroke-width="1"   opacity="0.18" stroke-linecap="round"/>
+          <line x1="30" y1="4"  x2="30" y2="50" stroke="#cce8f4" stroke-width="1.5" opacity="0.5"  stroke-linecap="round"/>
+          <line x1="20" y1="18" x2="40" y2="18" stroke="#6cd5e6" stroke-width="2.5" stroke-linecap="round"/>
+          <line x1="20" y1="39" x2="40" y2="39" stroke="#6cd5e6" stroke-width="2.5" stroke-linecap="round"/>
+          <line x1="24" y1="28" x2="36" y2="28" stroke="#6cd5e6" stroke-width="1.5" stroke-linecap="round"/>
+          <circle cx="17" cy="18" r="1.5" fill="#6cd5e6" opacity="0.7"/>
+          <circle cx="17" cy="39" r="1.5" fill="#6cd5e6" opacity="0.7"/>
+          <path d="M30,49 C30,49 22,53 22,58 C22,62.4 25.6,66 30,66 C34.4,66 38,62.4 38,58 C38,53 30,49 30,49Z" fill="#6cd5e6"/>
+          <circle cx="30" cy="58" r="2.5" fill="#060a0f" opacity="0.85"/>
+        </g>
+      </svg>
+      <div class="rag-auth-headline">
+        <span class="prompt-mark">$</span> <span style="color:#eaf3fa;">rag</span>
+      </div>
+      <div class="rag-auth-sub">SELF-HOSTED KNOWLEDGE BASE</div>
     </div>
+
+    <!-- Register panel -->
+    <div class="fc-panel" style="width:100%;">
+      <span class="fc-panel__title">[ create account ]</span>
+
+      <form id="registerForm">
+        <div class="fc-field" style="margin-bottom:13px;">
+          <label class="fc-field__label" for="username">Username</label>
+          <input class="fc-input" type="text" id="username" name="username"
+                 placeholder="captain" autocomplete="username" required autofocus>
+        </div>
+        <div class="fc-field" style="margin-bottom:13px;">
+          <label class="fc-field__label" for="email">Email</label>
+          <input class="fc-input" type="email" id="email" name="email"
+                 placeholder="captain@fathomworks.local" autocomplete="email" required>
+        </div>
+        <div class="fc-field" style="margin-bottom:18px;">
+          <label class="fc-field__label" for="password">
+            Password <span style="font-size:10px;letter-spacing:0;color:var(--text-muted);">(min 8 chars)</span>
+          </label>
+          <input class="fc-input" type="password" id="password" name="password"
+                 placeholder="enter password" autocomplete="new-password" required minlength="8">
+        </div>
+        <button type="submit" class="fc-btn fc-btn--primary w-100">Create Account</button>
+      </form>
+
+      <div id="registerError"   class="rag-alert rag-alert--danger  d-none"></div>
+      <div id="registerSuccess" class="rag-alert rag-alert--success d-none"></div>
+
+      <div style="border-top:1px solid var(--line);margin-top:18px;padding-top:14px;text-align:center;font-size:12px;color:var(--text-muted);">
+        Already registered? <a href="/login" style="color:var(--sonar);">Login &#8594;</a>
+      </div>
+    </div>
+
+  </div>
 </div>
-{% endblock %}
-{% block scripts %}
+
 <script>
 document.getElementById('registerForm').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const body = {
-        username: document.getElementById('username').value,
-        email: document.getElementById('email').value,
-        password: document.getElementById('password').value,
-    };
+  e.preventDefault();
+  const errEl  = document.getElementById('registerError');
+  const okEl   = document.getElementById('registerSuccess');
+  errEl.classList.add('d-none');
+  okEl.classList.add('d-none');
 
-    const resp = await fetch('/api/auth/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-    });
+  const body = {
+    username: document.getElementById('username').value,
+    email:    document.getElementById('email').value,
+    password: document.getElementById('password').value,
+  };
 
-    if (resp.ok) {
-        document.getElementById('registerSuccess').textContent = 'Account created! Redirecting to login...';
-        document.getElementById('registerSuccess').style.display = 'block';
-        setTimeout(() => window.location.href = '/login', 1500);
-    } else {
-        const err = await resp.json();
-        const el = document.getElementById('registerError');
-        el.textContent = err.detail || 'Registration failed';
-        el.style.display = 'block';
-    }
+  const resp = await fetch('/api/auth/register', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+
+  if (resp.ok) {
+    okEl.textContent = '&#10003; Account created! Redirecting to login\u2026';
+    okEl.classList.remove('d-none');
+    setTimeout(() => window.location.href = '/login', 1500);
+  } else {
+    const err = await resp.json();
+    errEl.textContent = '! ' + (err.detail || 'Registration failed');
+    errEl.classList.remove('d-none');
+  }
 });
 </script>
-{% endblock %}
+
+</body>
+</html>
