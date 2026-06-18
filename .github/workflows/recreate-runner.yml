@@ -1,0 +1,41 @@
+name: Recreate self-hosted runner
+on:
+  workflow_dispatch:
+jobs:
+  recreate:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Generate fresh registration token
+        id: token
+        run: |
+          TOKEN=$(gh api --method POST repos/${{ github.repository }}/actions/runners/registration-token --jq '.token')
+          echo "reg_token=$TOKEN" >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: SSH and recreate runner
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          envs: REG_TOKEN
+          script: |
+            docker rm -f github-runner 2>/dev/null || true
+            docker run -d \
+              --name github-runner \
+              --restart unless-stopped \
+              -e REPO_URL=https://github.com/${{ github.repository }} \
+              -e RUNNER_TOKEN=$REG_TOKEN \
+              -e RUNNER_NAME=webserver-runner-2 \
+              -e LABELS=self-hosted \
+              -e DISABLE_AUTO_UPDATE=true \
+              -e RUNNER_WORKDIR=/tmp/runner/work \
+              -v /var/run/docker.sock:/var/run/docker.sock \
+              myoung34/github-runner:latest
+            sleep 5
+            docker ps | grep github-runner
+        env:
+          REG_TOKEN: ${{ steps.token.outputs.reg_token }}
