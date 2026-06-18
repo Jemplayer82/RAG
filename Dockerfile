@@ -40,6 +40,6 @@ CMD ["gunicorn", "app_fastapi:app", \
      "--workers", "2", \
      "--worker-class", "uvicorn.workers.UvicornWorker", \
      "--bind", "0.0.0.0:8000", \
-     "--timeout", "120", \
+     "--timeout", "300", \
      "--keep-alive", "5", \
      "--log-level", "info"]

@@ -608,7 +608,7 @@ async def add_source(
 
     # Save uploaded file to disk (size-capped, safe filename, type from extension)
     if doc_type in ("pdf", "txt", "doc", "docx") and file:
-        MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB
+        MAX_UPLOAD_BYTES = 500 * 1024 * 1024  # 500 MB
 
         # The real file extension is authoritative over the client-sent type,
         # so the correct ingester runs even if `type` was spoofed.
@@ -636,7 +636,7 @@ async def add_source(
                 await f.write(chunk)
         if too_large:
             dest.unlink(missing_ok=True)  # handle is closed now (Windows-safe)
-            raise HTTPException(status_code=413, detail="File too large (max 50 MB)")
+            raise HTTPException(status_code=413, detail="File too large (max 500 MB)")
 
         file_path = str(dest)
 
