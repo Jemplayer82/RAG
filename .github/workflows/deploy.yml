@@ -50,9 +50,12 @@ jobs:
 
   deploy:
     needs: build-and-push
-    runs-on: [self-hosted, webserver]
+    runs-on: [self-hosted]
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Ensure data directories exist
         run: |
           DATA_ROOT="${DATA_ROOT:-/storage/rag}"
@@ -61,9 +64,6 @@ jobs:
 
       - name: Deploy
         run: |
-          cd /opt/rag
-          git config --global --add safe.directory /opt/rag
-          git pull
           # Use only the base compose file: the override (build: . / pull_policy:
           # build) is for local dev. On the VPS we must PULL the GHCR image, not
           # build it on the box.
