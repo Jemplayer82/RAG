@@ -4,6 +4,18 @@
 {% block content %}
 <div class="rag-main rag-container--md">
 
+  <!-- Target library -->
+  <section class="fc-panel" style="margin-bottom:18px;">
+    <span class="fc-panel__title">[ target library ]</span>
+    <div class="fc-field" style="max-width:360px;">
+      <label class="fc-field__label" for="librarySelect">Add sources to</label>
+      <select class="fc-select" id="librarySelect" required></select>
+    </div>
+    <div id="noLibNotice" class="d-none" style="font-size:12px;color:var(--text-muted);margin-top:8px;">
+      No libraries yet &mdash; <a href="/admin/libraries">create one</a> before adding sources.
+    </div>
+  </section>
+
   <!-- Sub-tab strip -->
   <nav class="fc-tabstrip" style="margin-bottom:18px;" id="uploadTabs">
     <button class="fc-tab fc-tab--active" id="file-tab" data-tab-target="#file-pane">upload file</button>
@@ -147,6 +159,35 @@
     if (!user.is_admin) { window.location.href = '/'; }
 })();
 
+// ---- Target library ----
+const librarySelect = document.getElementById('librarySelect');
+
+async function loadLibrariesIntoSelect() {
+    try {
+        const resp = await fetch('/api/libraries', { headers: { 'Authorization': `Bearer ${localStorage.getItem('rag_token')}` } });
+        if (!resp.ok) return;
+        const data = await resp.json();
+        const libs = data.libraries || [];
+        librarySelect.innerHTML = '';
+        for (const l of libs) {
+            const opt = document.createElement('option');   // textContent auto-escapes the name
+            opt.value = l.id;
+            opt.textContent = `${l.name} (${l.document_count})`;
+            librarySelect.appendChild(opt);
+        }
+        const hasLibs = libs.length > 0;
+        document.getElementById('noLibNotice').classList.toggle('d-none', hasLibs);
+        document.getElementById('fileSubmitBtn').disabled = !hasLibs;
+        document.getElementById('urlSubmitBtn').disabled = !hasLibs;
+    } catch (err) { console.error('Failed to load libraries:', err); }
+}
+
+function currentLibraryId() {
+    return librarySelect.value;
+}
+
+loadLibrariesIntoSelect();
+
 const ALLOWED_TYPES = { pdf: 'pdf', txt: 'txt', doc: 'doc', docx: 'docx' };
 
 document.getElementById('fileUploadForm').addEventListener('submit', async (e) => {
@@ -155,6 +196,8 @@ document.getElementById('fileUploadForm').addEventListener('submit', async (e) =
     const titleInput = document.getElementById('fileTitleInput');
     const files = Array.from(fileInput.files);
     if (files.length === 0) return;
+    const libraryId = currentLibraryId();
+    if (!libraryId) { showStatus('file', 'error', 'Select a target library first.'); return; }
     const submitBtn = document.getElementById('fileSubmitBtn');
     submitBtn.disabled = true;
     const results = { ok: 0, fail: 0, errors: [] };
@@ -171,6 +214,7 @@ document.getElementById('fileUploadForm').addEventListener('submit', async (e) =
             try {
                 const formData = new FormData();
                 formData.append('type', type); formData.append('title', title); formData.append('file', file);
+                formData.append('library_id', libraryId);
                 const response = await fetch('/api/sources', { method: 'POST', headers: { 'Authorization': `Bearer ${localStorage.getItem('rag_token')}` }, body: formData });
                 if (response.status === 401) { window.location.href = '/login'; return; }
                 const data = await response.json();
@@ -195,11 +239,14 @@ document.getElementById('urlForm').addEventListener('submit', async (e) => {
     const url = document.getElementById('urlInput').value.trim();
     const title = document.getElementById('urlTitleInput').value.trim();
     if (!url || !title) return;
+    const libraryId = currentLibraryId();
+    if (!libraryId) { showStatus('url', 'error', 'Select a target library first.'); return; }
     showStatus('url', 'progress', 'Submitting URL...');
     setProgress('url', 5, 'Submitting URL...');
     try {
         const fd = new FormData();
         fd.append('type', 'url'); fd.append('url', url); fd.append('title', title);
+        fd.append('library_id', libraryId);
         const crawl = document.getElementById('urlCrawlCheck').checked;
         fd.append('crawl', crawl ? 'true' : 'false');
         if (crawl) {

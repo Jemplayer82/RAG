@@ -16,6 +16,14 @@
     </div>
   </div>
 
+  <!-- Library filter -->
+  <div class="fc-field" style="max-width:300px;margin-bottom:18px;">
+    <label class="fc-field__label" for="libraryFilter">Library</label>
+    <select class="fc-select" id="libraryFilter">
+      <option value="">All libraries</option>
+    </select>
+  </div>
+
   <!-- Feedback -->
   <div id="errorBox" class="rag-alert rag-alert--danger d-none"></div>
 
@@ -37,6 +45,7 @@
           <tr>
             <th data-sort="title" style="cursor:pointer;user-select:none;">Title &#8645;</th>
             <th data-sort="doc_type" style="cursor:pointer;user-select:none;">Type &#8645;</th>
+            <th>Library</th>
             <th data-sort="chunks" style="cursor:pointer;user-select:none;">Chunks &#8645;</th>
             <th>Added</th>
             <th style="text-align:right;">Actions</th>
@@ -57,6 +66,7 @@ let documents = [];
 let isAdmin = false;
 let sortColumn = 'created_at';
 let sortDirection = 'desc';
+let libMap = {};  // library_id -> escaped name
 
 function escapeHtml(s) {
     return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -71,9 +81,11 @@ function renderRow(doc) {
     const actions = isAdmin
         ? `<button class="btn btn-sm btn-outline-danger" data-delete="${doc.id}" title="Delete">remove</button>`
         : '';
+    const libName = libMap[doc.library_id] || '&mdash;';
     return `<tr data-title="${escapeHtml(doc.title).toLowerCase()}" data-doc_type="${doc.doc_type}" data-chunks="${doc.chunks}" data-created_at="${doc.created_at}">
         <td>${title}</td>
         <td><span class="badge ${badge}">${escapeHtml(doc.doc_type)}</span></td>
+        <td style="color:var(--text-muted);font-size:11px;">${libName}</td>
         <td>${doc.chunks}</td>
         <td style="color:var(--text-muted);font-size:11px;">${escapeHtml(created)}</td>
         <td style="text-align:right;">${actions}</td>
@@ -139,15 +151,35 @@ function renderTable() {
     });
 }
 
+async function loadLibraryList() {
+    const token = localStorage.getItem('rag_token');
+    try {
+        const resp = await fetch('/api/libraries', { headers: { Authorization: `Bearer ${token}` } });
+        if (!resp.ok) return;
+        const libs = (await resp.json()).libraries || [];
+        libMap = {};
+        const sel = document.getElementById('libraryFilter');
+        for (const l of libs) {
+            libMap[l.id] = escapeHtml(l.name);
+            const opt = document.createElement('option');
+            opt.value = l.id; opt.textContent = l.name;
+            sel.appendChild(opt);
+        }
+    } catch (e) { /* non-fatal: filter just stays "All" */ }
+}
+
 async function loadLibrary() {
     const token = localStorage.getItem('rag_token');
     if (!token) { window.location.href = '/login'; return; }
+    document.getElementById('loadingBox').classList.remove('d-none');
     try {
         const meResp = await fetch('/api/auth/me', { headers: { Authorization: `Bearer ${token}` } });
         if (!meResp.ok) { localStorage.removeItem('rag_token'); window.location.href = '/login'; return; }
         isAdmin = (await meResp.json()).is_admin;
 
-        const resp = await fetch('/api/library', { headers: { Authorization: `Bearer ${token}` } });
+        const libId = document.getElementById('libraryFilter').value;
+        const url = libId ? `/api/library?library_id=${encodeURIComponent(libId)}` : '/api/library';
+        const resp = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const data = await resp.json();
         documents = data.documents || [];
@@ -161,6 +193,8 @@ async function loadLibrary() {
     }
 }
 
+document.getElementById('libraryFilter').addEventListener('change', loadLibrary);
+
 document.querySelectorAll('th[data-sort]').forEach(h => {
     h.addEventListener('click', () => {
         const col = h.dataset.sort;
@@ -170,6 +204,6 @@ document.querySelectorAll('th[data-sort]').forEach(h => {
     });
 });
 
-loadLibrary();
+(async () => { await loadLibraryList(); await loadLibrary(); })();
 </script>
 {% endblock %}
