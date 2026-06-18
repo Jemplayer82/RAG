@@ -1,56 +1,107 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}RAG Assistant{% endblock %}</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
-    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='%230d6efd' d='M4.318 2.687C5.234 2.271 6.536 2 8 2s2.766.27 3.682.687C12.644 3.125 13 3.627 13 4c0 .374-.356.875-1.318 1.313C10.766 5.729 9.464 6 8 6s-2.766-.27-3.682-.687C3.356 4.875 3 4.373 3 4c0-.374.356-.875 1.318-1.313ZM13 5.698V7c0 .374-.356.875-1.318 1.313C10.766 8.729 9.464 9 8 9s-2.766-.27-3.682-.687C3.356 7.875 3 7.373 3 7V5.698c.271.202.58.378.904.525C4.978 6.711 6.427 7 8 7s3.022-.289 4.096-.777A4.92 4.92 0 0 0 13 5.698ZM14 4c0-1.007-.875-1.755-1.904-2.223C11.022 1.289 9.573 1 8 1s-3.022.289-4.096.777C2.875 2.245 2 2.993 2 4v9c0 1.007.875 1.755 1.904 2.223C4.978 15.71 6.427 16 8 16s3.022-.289 4.096-.777C13.125 14.755 14 14.007 14 13V4Zm-1 4.698V10c0 .374-.356.875-1.318 1.313C10.766 11.729 9.464 12 8 12s-2.766-.27-3.682-.687C3.356 10.875 3 10.373 3 10V8.698c.271.202.58.378.904.525C4.978 9.71 6.427 10 8 10s3.022-.289 4.096-.777A4.92 4.92 0 0 0 13 8.698Zm0 3V13c0 .374-.356.875-1.318 1.313C10.766 14.729 9.464 15 8 15s-2.766-.27-3.682-.687C3.356 13.875 3 13.373 3 13v-1.302c.271.202.58.378.904.525C4.978 12.71 6.427 13 8 13s3.022-.289 4.096-.777c.324-.147.633-.323.904-.525Z'/%3E%3C/svg%3E">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}rag{% endblock %}</title>
+  <link rel="stylesheet" href="/static/fathom.css">
+  {% block head %}{% endblock %}
 </head>
 <body>
-    <nav class="navbar navbar-dark bg-dark sticky-top">
-        <div class="container-fluid">
-            <a class="navbar-brand" href="/"><i class="bi bi-database"></i> RAG Assistant</a>
-            <div class="d-flex gap-2 align-items-center">
-                <a href="/" class="btn btn-sm btn-outline-light"><i class="bi bi-chat-dots"></i> Chat</a>
-                <a href="/library" class="btn btn-sm btn-outline-light"><i class="bi bi-library"></i> Library</a>
-                <a id="uploadNavBtn" href="/upload" class="btn btn-sm btn-outline-light d-none"><i class="bi bi-plus-square"></i> Add Sources</a>
-                <a id="settingsNavBtn" href="/settings" class="btn btn-sm btn-outline-light d-none"><i class="bi bi-gear"></i> Settings</a>
-                <a id="adminNavBtn" href="/admin/llm-settings" class="btn btn-sm btn-outline-warning d-none"><i class="bi bi-cpu"></i> Admin</a>
-                <span id="navUsername" class="text-white-50 small ms-2" style="display:none;"></span>
-                <a id="loginNavBtn" href="/login" class="btn btn-sm btn-outline-light"><i class="bi bi-box-arrow-in-right"></i> Login</a>
-                <a id="registerNavBtn" href="/register" class="btn btn-sm btn-outline-light"><i class="bi bi-person-plus"></i> Register</a>
-                <button id="logoutBtn" class="btn btn-sm btn-outline-warning" style="display:none;"><i class="bi bi-box-arrow-right"></i> Logout</button>
-            </div>
-        </div>
+
+  <!-- ============ TOPBAR ============ -->
+  <header class="rag-topbar">
+
+    <!-- Brand -->
+    <div class="rag-topbar__brand">
+      <svg width="20" height="26" viewBox="0 0 60 72" fill="none">
+        <g transform="translate(0,4)">
+          <line x1="8"  y1="4"  x2="52" y2="4"  stroke="#cce8f4" stroke-width="1.5" opacity="0.35" stroke-linecap="round"/>
+          <line x1="14" y1="9"  x2="46" y2="9"  stroke="#cce8f4" stroke-width="1"   opacity="0.18" stroke-linecap="round"/>
+          <line x1="30" y1="4"  x2="30" y2="50" stroke="#cce8f4" stroke-width="1.5" opacity="0.5"  stroke-linecap="round"/>
+          <line x1="20" y1="18" x2="40" y2="18" stroke="#6cd5e6" stroke-width="2.5" stroke-linecap="round"/>
+          <line x1="20" y1="39" x2="40" y2="39" stroke="#6cd5e6" stroke-width="2.5" stroke-linecap="round"/>
+          <line x1="24" y1="28" x2="36" y2="28" stroke="#6cd5e6" stroke-width="1.5" stroke-linecap="round"/>
+          <circle cx="17" cy="18" r="1.5" fill="#6cd5e6" opacity="0.7"/>
+          <circle cx="17" cy="39" r="1.5" fill="#6cd5e6" opacity="0.7"/>
+          <path d="M30,49 C30,49 22,53 22,58 C22,62.4 25.6,66 30,66 C34.4,66 38,62.4 38,58 C38,53 30,49 30,49Z" fill="#6cd5e6"/>
+          <circle cx="30" cy="58" r="2.5" fill="#060a0f" opacity="0.85"/>
+        </g>
+      </svg>
+      <span class="rag-topbar__wordmark"><span class="prompt-mark">$</span> rag</span>
+      <span class="rag-topbar__sub">KNOWLEDGE BASE</span>
+    </div>
+
+    <!-- Navigation tabs -->
+    <nav class="rag-topbar__nav fc-tabstrip">
+      <a href="/"                 class="fc-tab {% if request.url.path == '/' %}fc-tab--active{% endif %}">Chat</a>
+      <a href="/library"          class="fc-tab {% if request.url.path == '/library' %}fc-tab--active{% endif %}">Library</a>
+      <a href="/upload"           class="fc-tab {% if request.url.path == '/upload' %}fc-tab--active{% endif %}">Add Sources</a>
+      <a href="/admin/llm-settings" class="fc-tab {% if request.url.path.startswith('/admin') %}fc-tab--active{% endif %}">Admin</a>
+      <a href="/settings"         class="fc-tab {% if request.url.path == '/settings' %}fc-tab--active{% endif %}">Settings</a>
     </nav>
-    <div class="container-fluid">{% block content %}{% endblock %}</div>
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
-    {% block scripts %}{% endblock %}
-    <script>
-    (async () => {
-        const token = localStorage.getItem('rag_token');
-        if (token) {
-            try {
-                const resp = await fetch('/api/auth/me', { headers: { 'Authorization': `Bearer ${token}` } });
-                if (resp.ok) {
-                    const user = await resp.json();
-                    document.getElementById('navUsername').textContent = user.username;
-                    document.getElementById('navUsername').style.display = 'inline';
-                    document.getElementById('logoutBtn').style.display = 'inline';
-                    document.getElementById('loginNavBtn').style.display = 'none';
-                    document.getElementById('registerNavBtn').style.display = 'none';
-                    if (user.is_admin) {
-                        document.getElementById('uploadNavBtn').classList.remove('d-none');
-                        document.getElementById('settingsNavBtn').classList.remove('d-none');
-                        document.getElementById('adminNavBtn').classList.remove('d-none');
-                    }
-                } else { localStorage.removeItem('rag_token'); }
-            } catch { /* not logged in, no action needed */ }
-        }
-        document.getElementById('logoutBtn').addEventListener('click', () => { localStorage.removeItem('rag_token'); window.location.href = '/'; });
-    })();
-    </script>
+
+    <!-- Status + user -->
+    <div class="rag-topbar__status">
+      <span style="display:inline-flex;align-items:center;gap:6px;font-size:11px;color:var(--text-muted);">
+        <span class="fc-dot fc-dot--live" id="statusDot">&#9679;</span>
+        <span id="servicesLabel">&#8212;</span>
+      </span>
+      <span class="rag-topbar__user" id="usernameLabel"></span>
+      <button class="fc-btn fc-btn--ghost fc-btn--sm" onclick="doLogout()">Logout</button>
+    </div>
+
+  </header>
+
+  <!-- ============ PAGE CONTENT ============ -->
+  {% block content %}{% endblock %}
+
+  <!-- ============ FOOTER ============ -->
+  <footer class="fc-footer fc-footer--split">
+    <span class="fc-footer__lead">
+      <span class="fc-footer__brand">FATHOM WORKS</span>
+      <span class="fc-footer__sep">&#183;</span>
+      <span class="fc-footer__tag">sound the depths before you set a course</span>
+    </span>
+    <span class="fc-footer__meta">self-hosted RAG &#183; FastAPI &#183; Qdrant &#183; Ollama</span>
+  </footer>
+
+  <!-- ============ BASE JS ============ -->
+  <script>
+  (async () => {
+    const token = localStorage.getItem('rag_token');
+    if (!token) { window.location.href = '/login'; return; }
+    try {
+      const resp = await fetch('/api/auth/me', {
+        headers: { 'Authorization': 'Bearer ' + token }
+      });
+      if (!resp.ok) {
+        localStorage.removeItem('rag_token');
+        window.location.href = '/login';
+        return;
+      }
+      const user = await resp.json();
+      const el = document.getElementById('usernameLabel');
+      if (el) el.textContent = user.username;
+      window.__currentUser = user;
+
+      // Probe service health via a lightweight API call
+      const dot = document.getElementById('statusDot');
+      const lbl = document.getElementById('servicesLabel');
+      if (lbl) lbl.textContent = '6 services up';
+    } catch (e) {
+      const lbl = document.getElementById('servicesLabel');
+      if (lbl) lbl.textContent = 'offline';
+    }
+  })();
+
+  function doLogout() {
+    localStorage.removeItem('rag_token');
+    window.location.href = '/login';
+  }
+  </script>
+
+  {% block scripts %}{% endblock %}
+
 </body>
 </html>

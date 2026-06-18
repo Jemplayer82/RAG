@@ -1,59 +1,52 @@
 {% extends "base.html" %}
-
-{% block title %}Library - RAG Assistant{% endblock %}
+{% block title %}Library — rag{% endblock %}
 
 {% block content %}
-<div class="py-4">
-    <div class="row mb-4">
-        <div class="col-md-8">
-            <h2><i class="bi bi-library"></i> Document Library</h2>
-            <p class="text-muted">Indexed documents available for querying.</p>
-        </div>
-    </div>
+<div class="rag-main rag-container">
 
-    <div class="row mb-4">
-        <div class="col-md-6">
-            <div class="card text-center">
-                <div class="card-body">
-                    <h4 id="statDocs">0</h4>
-                    <p class="text-muted mb-0">Documents</p>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-6">
-            <div class="card text-center">
-                <div class="card-body">
-                    <h4 id="statChunks">0</h4>
-                    <p class="text-muted mb-0">Chunks Indexed</p>
-                </div>
-            </div>
-        </div>
+  <!-- Stats row -->
+  <div class="rag-stats" style="margin-bottom:18px;">
+    <div class="fc-stat fc-panel" style="padding:12px 14px;">
+      <span class="fc-stat__label">Documents</span>
+      <span class="fc-stat__value fc-stat__value--accent" id="statDocs">0</span>
     </div>
-
-    <div id="errorBox" class="alert alert-danger d-none"></div>
-
-    <div id="loadingBox" class="text-center py-4">
-        <div class="spinner-border" role="status"><span class="visually-hidden">Loading...</span></div>
+    <div class="fc-stat fc-panel" style="padding:12px 14px;">
+      <span class="fc-stat__label">Chunks indexed</span>
+      <span class="fc-stat__value" id="statChunks">0</span>
     </div>
+  </div>
 
-    <div id="emptyBox" class="alert alert-info d-none">
-        <strong>No documents indexed yet.</strong> Upload documents or add URLs using the <a href="/upload">Add Sources</a> page.
-    </div>
+  <!-- Feedback -->
+  <div id="errorBox" class="rag-alert rag-alert--danger d-none"></div>
 
-    <div id="tableWrap" class="table-responsive d-none">
-        <table class="table table-hover" id="documentsTable">
-            <thead class="table-light">
-                <tr>
-                    <th style="cursor: pointer; user-select: none;" data-sort="title">Title <i class="bi bi-arrow-down-up" style="opacity: 0.5;"></i></th>
-                    <th style="cursor: pointer; user-select: none;" data-sort="doc_type">Type <i class="bi bi-arrow-down-up" style="opacity: 0.5;"></i></th>
-                    <th style="cursor: pointer; user-select: none;" data-sort="chunks">Chunks <i class="bi bi-arrow-down-up" style="opacity: 0.5;"></i></th>
-                    <th>Added</th>
-                    <th class="text-end">Actions</th>
-                </tr>
-            </thead>
-            <tbody id="tableBody"></tbody>
-        </table>
+  <div id="loadingBox" style="text-align:center;padding:32px 0;">
+    <div class="rag-spinner"></div>
+  </div>
+
+  <div id="emptyBox" class="rag-alert rag-alert--info d-none">
+    <strong>No documents indexed yet.</strong>
+    Upload documents or add URLs using the <a href="/upload">Add Sources</a> page.
+  </div>
+
+  <!-- Table -->
+  <div id="tableWrap" class="fc-panel d-none">
+    <span class="fc-panel__title">[ document library ]</span>
+    <div style="overflow-x:auto;">
+      <table class="rag-table" id="documentsTable">
+        <thead>
+          <tr>
+            <th data-sort="title" style="cursor:pointer;user-select:none;">Title &#8645;</th>
+            <th data-sort="doc_type" style="cursor:pointer;user-select:none;">Type &#8645;</th>
+            <th data-sort="chunks" style="cursor:pointer;user-select:none;">Chunks &#8645;</th>
+            <th>Added</th>
+            <th style="text-align:right;">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="tableBody"></tbody>
+      </table>
     </div>
+  </div>
+
 </div>
 {% endblock %}
 
@@ -76,14 +69,14 @@ function renderRow(doc) {
         : `<a href="#" data-download="${doc.id}" data-name="${escapeHtml(doc.title)}">${escapeHtml(doc.title)}</a>`;
     const created = new Date(doc.created_at).toLocaleString();
     const actions = isAdmin
-        ? `<button class="btn btn-sm btn-outline-danger" data-delete="${doc.id}" title="Delete"><i class="bi bi-trash"></i></button>`
+        ? `<button class="btn btn-sm btn-outline-danger" data-delete="${doc.id}" title="Delete">remove</button>`
         : '';
     return `<tr data-title="${escapeHtml(doc.title).toLowerCase()}" data-doc_type="${doc.doc_type}" data-chunks="${doc.chunks}" data-created_at="${doc.created_at}">
         <td>${title}</td>
         <td><span class="badge ${badge}">${escapeHtml(doc.doc_type)}</span></td>
-        <td><small>${doc.chunks}</small></td>
-        <td><small class="text-muted">${escapeHtml(created)}</small></td>
-        <td class="text-end">${actions}</td>
+        <td>${doc.chunks}</td>
+        <td style="color:var(--text-muted);font-size:11px;">${escapeHtml(created)}</td>
+        <td style="text-align:right;">${actions}</td>
     </tr>`;
 }
 
@@ -126,15 +119,10 @@ function renderTable() {
                 const blob = await resp.blob();
                 const url = URL.createObjectURL(blob);
                 const link = document.createElement('a');
-                link.href = url;
-                link.download = filename;
-                document.body.appendChild(link);
-                link.click();
-                link.remove();
+                link.href = url; link.download = filename;
+                document.body.appendChild(link); link.click(); link.remove();
                 setTimeout(() => URL.revokeObjectURL(url), 1000);
-            } catch (err) {
-                alert('Download failed: ' + err.message);
-            }
+            } catch (err) { alert('Download failed: ' + err.message); }
         });
     });
 
@@ -144,11 +132,7 @@ function renderTable() {
             if (!confirm('Delete this document?')) return;
             const token = localStorage.getItem('rag_token');
             const resp = await fetch(`/api/sources/${id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
-            if (!resp.ok) {
-                const err = await resp.text();
-                alert(`Delete failed: ${err}`);
-                return;
-            }
+            if (!resp.ok) { const err = await resp.text(); alert(`Delete failed: ${err}`); return; }
             documents = documents.filter(d => d.id != id);
             renderTable();
         });
