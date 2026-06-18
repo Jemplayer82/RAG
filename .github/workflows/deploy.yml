@@ -78,6 +78,7 @@ jobs:
           docker compose -f docker-compose.yml up -d --no-recreate postgres qdrant redis ollama
           # Pull and hot-swap only the app containers with the new image.
           docker compose -f docker-compose.yml pull rag rag-worker
+          docker compose -f docker-compose.yml stop rag rag-worker
           docker compose -f docker-compose.yml up -d --no-deps rag rag-worker
           docker image prune -f
           echo "Deploy complete: $(date)"
