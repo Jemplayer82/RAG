@@ -18,6 +18,15 @@ RUN pip install --no-cache-dir -r requirements.txt && \
     (python -m playwright install chromium --with-deps \
      || echo "WARNING: playwright/chromium install failed; JS scraping will fall back to requests")
 
+# Pre-download the embedding model so it is baked into the image rather than
+# fetched (~1.3GB) at runtime on the first query. The HF cache is NOT on a
+# persistent volume, so without this every container recreation (i.e. every
+# deploy) re-downloads the model — making the first query after each deploy
+# hang for 20-120s. This layer is cached as long as EMBED_MODEL is unchanged.
+ARG EMBED_MODEL=BAAI/bge-large-en-v1.5
+ENV EMBED_MODEL=${EMBED_MODEL}
+RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('${EMBED_MODEL}')"
+
 COPY . .
 
 RUN mkdir -p data/raw/uploads
