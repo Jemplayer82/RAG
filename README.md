@@ -25,7 +25,7 @@
 | Job queue | Redis + RQ (background ingestion) |
 | Embeddings | `BAAI/bge-large-en-v1.5` via sentence-transformers |
 | LLM | Ollama (bundled container) or OpenAI / Anthropic / generic |
-| Frontend | Jinja2 templates + Bootstrap 5.3 |
+| Frontend | Jinja2 templates + custom Fathom CSS (no framework dependency) |
 
 ---
 
@@ -108,7 +108,7 @@ Make sure the host directories exist first (see Prerequisites), then:
 | `DATA_ROOT` | No | Host base directory for data (default: `/storage/rag`) |
 | `LLM_PROVIDER` | No | `ollama` (default), `openai`, `anthropic`, or `generic` |
 | `LLM_MODEL` | No | Model name — leave blank to configure from the admin UI |
-| `LLM_BASE_URL` | No | Ollama URL inside the stack (default: `http://ollama:11434`) |
+| `LLM_BASE_URL` | No | Fixed to the in-stack Ollama (`http://ollama:11434`) in `docker-compose.yml`. For a remote Ollama or cloud endpoint, set the Base URL per-provider in the admin UI instead. |
 | `OPENAI_API_KEY` | No | Required only when using OpenAI |
 | `ANTHROPIC_API_KEY` | No | Required only when using Anthropic |
 | `EMBED_MODEL` | No | HuggingFace embedding model (default: `BAAI/bge-large-en-v1.5`) |
@@ -156,11 +156,20 @@ CI/CD is configured in `.github/workflows/deploy.yml`. Add `VPS_HOST`, `VPS_USER
 ```bash
 $ python -m venv venv && source venv/bin/activate
 $ pip install -r requirements.txt
-$ cp .env.example .env # point OLLAMA_BASE_URL to localhost:11434
+$ cp .env.example .env
+# Add OLLAMA_BASE_URL=http://localhost:11434 to .env if Ollama runs on the host
 
 # Requires local PostgreSQL, Qdrant, and Redis
 $ uvicorn app_fastapi:app --reload --port 8000
 ```
+
+---
+
+## `[ license ]`
+
+Released under the [GNU AGPL-3.0](LICENSE). If you run a modified version as a
+network service, the license requires you to make your source available to its
+users.
 
 ---
 
