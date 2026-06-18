@@ -55,8 +55,11 @@ services:
       ADMIN_USERNAME: ${ADMIN_USERNAME:-}
       LLM_PROVIDER: ${LLM_PROVIDER:-ollama}
       LLM_MODEL: ${LLM_MODEL:-}
-      LLM_BASE_URL: ${LLM_BASE_URL:-http://ollama:11434}
-      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
+      # Ollama is always part of the stack — point at the in-stack container.
+      # Hardcoded (not env-overridable) so a stray .env value can't aim it at a
+      # dead host. Admins can still override per-provider in the UI if needed.
+      LLM_BASE_URL: http://ollama:11434
+      OLLAMA_BASE_URL: http://ollama:11434
       LLM_TEMPERATURE: ${LLM_TEMPERATURE:-0.3}
       LLM_TOP_P: ${LLM_TOP_P:-0.9}
       LLM_MAX_TOKENS: ${LLM_MAX_TOKENS:-2048}
