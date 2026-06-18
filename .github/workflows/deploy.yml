@@ -46,7 +46,10 @@ jobs:
           cd /opt/rag
           git config --global --add safe.directory /opt/rag
           git pull
-          docker compose pull rag rag-worker
-          docker compose up -d --no-deps rag rag-worker
+          # Use only the base compose file: the override (build: . / pull_policy:
+          # build) is for local dev. On the VPS we must PULL the GHCR image, not
+          # build it on the box.
+          docker compose -f docker-compose.yml pull rag rag-worker
+          docker compose -f docker-compose.yml up -d --no-deps rag rag-worker
           docker image prune -f
           echo "Deploy complete: $(date)"
