@@ -1,5 +1,7 @@
 <img src="assets/fathom-header-banner.svg" alt="Fathom Works — rag" width="100%">
 
+<img src="assets/rag-banner.webp" alt="Fathom Works — rag" width="100%">
+
 # `$ rag`
 
 **A self-hosted web application that lets multiple authenticated users upload documents and chat with an AI that answers questions grounded in their content.** Built for production — async, Dockerized, and configurable to use a local Ollama model or any cloud LLM provider.
