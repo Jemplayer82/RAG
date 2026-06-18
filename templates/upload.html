@@ -186,6 +186,9 @@ function currentLibraryId() {
     return librarySelect.value;
 }
 
+// Keep the manage list in sync with the chosen target library.
+librarySelect.addEventListener('change', loadSources);
+
 loadLibrariesIntoSelect();
 
 const ALLOWED_TYPES = { pdf: 'pdf', txt: 'txt', doc: 'doc', docx: 'docx' };
@@ -316,7 +319,11 @@ function showStatus(prefix, state, message) {
 
 async function loadSources() {
     try {
-        const response = await fetch('/api/library', { headers: { 'Authorization': `Bearer ${localStorage.getItem('rag_token')}` } });
+        // Scope the manage list to the selected target library so the delete
+        // buttons can't act on a document from a different library by surprise.
+        const libId = currentLibraryId();
+        const url = libId ? `/api/library?library_id=${encodeURIComponent(libId)}` : '/api/library';
+        const response = await fetch(url, { headers: { 'Authorization': `Bearer ${localStorage.getItem('rag_token')}` } });
         if (response.status === 401) { window.location.href = '/login'; return; }
         const data = await response.json();
         const container = document.getElementById('sourcesList');

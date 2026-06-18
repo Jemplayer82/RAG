@@ -59,6 +59,7 @@ from pydantic import BaseModel
 from redis import Redis
 from rq import Queue
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 from werkzeug.utils import secure_filename
 
 from config import (
@@ -153,7 +154,7 @@ def require_admin(user: User = Depends(get_current_user)) -> User:
 
 def get_admin_user_id(db: Session) -> int:
     """Return the first admin user's ID for public queries. Raises 503 if none exists."""
-    admin = db.query(User).filter(User.is_admin == True).first()
+    admin = db.query(User).filter(User.is_admin == True).order_by(User.id).first()
     if not admin:
         raise HTTPException(status_code=503, detail="No admin account configured yet. Please set up an admin user.")
     return admin.id
@@ -473,6 +474,18 @@ async def list_libraries(user: User = Depends(get_current_user), db: Session = D
         .order_by(Library.created_at.asc())
         .all()
     )
+    # Self-heal: if the admin somehow has no library (e.g. a swallowed failure
+    # during first-admin registration), create the starter one now. Idempotent.
+    if not libs:
+        admin = db.query(User).filter(User.id == admin_id).first()
+        if admin:
+            ensure_default_library(db, admin)
+            libs = (
+                db.query(Library)
+                .filter(Library.owner_id == admin_id)
+                .order_by(Library.created_at.asc())
+                .all()
+            )
     out = []
     for lib in libs:
         count = db.query(Document).filter(Document.library_id == lib.id).count()
@@ -510,7 +523,12 @@ async def create_library(
     db.add(lib)
     db.flush()
     lib.collection_name = f"lib_{lib.id}"
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # Lost a race against a concurrent create with the same name.
+        db.rollback()
+        raise HTTPException(status_code=409, detail="A library with that name already exists")
     db.refresh(lib)
     logger.info("[LIBRARY] Created '%s' (collection=%s) by %s", lib.name, lib.collection_name, user.username)
     return {"id": lib.id, "name": lib.name, "collection_name": lib.collection_name}
@@ -529,21 +547,29 @@ async def delete_library(
     if total <= 1:
         raise HTTPException(status_code=409, detail="Cannot delete the only library. Create another first.")
 
-    # Drop the whole Qdrant collection (the library owns it 1:1).
-    try:
-        qm = QdrantManager(collection_name=lib.collection_name)
-        await asyncio.to_thread(qm.client.delete_collection, lib.collection_name)
-    except Exception as e:
-        logger.warning("[LIBRARY] Qdrant collection drop warning for %s: %s", lib.collection_name, e)
+    collection = lib.collection_name
+    name = lib.name
 
-    # Remove documents (their ingestion jobs cascade via Document.jobs), then the library.
+    # Remove documents (their ingestion jobs cascade via Document.jobs), then the
+    # library — and COMMIT before touching Qdrant. Dropping the collection is the
+    # irreversible side effect, so it must come last: if the DB delete fails we
+    # don't want a library left pointing at a vaporized collection.
     docs = db.query(Document).filter(Document.library_id == lib.id).all()
+    doc_count = len(docs)
     for d in docs:
         db.delete(d)
     db.delete(lib)
     db.commit()
-    logger.info("[LIBRARY] Deleted '%s' (%d docs) by %s", lib.name, len(docs), user.username)
-    return {"status": "deleted", "id": library_id, "documents_removed": len(docs)}
+
+    # Postgres is consistent now — drop the whole Qdrant collection (1:1).
+    try:
+        qm = QdrantManager(collection_name=collection)
+        await asyncio.to_thread(qm.client.delete_collection, collection)
+    except Exception as e:
+        logger.warning("[LIBRARY] Qdrant collection drop warning for %s: %s", collection, e)
+
+    logger.info("[LIBRARY] Deleted '%s' (%d docs) by %s", name, doc_count, user.username)
+    return {"status": "deleted", "id": library_id, "documents_removed": doc_count}
 
 
 # ============================================================================

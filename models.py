@@ -261,8 +261,9 @@ def _init_schema_locked(conn):
         {"o": admin_id, "n": DEFAULT_ADOPTED_LIBRARY_NAME},
     ).first()[0]
     res = conn.execute(
-        text("UPDATE documents SET library_id = :lid WHERE library_id IS NULL"),
-        {"lid": lib_id},
+        text("UPDATE documents SET library_id = :lid "
+             "WHERE library_id IS NULL AND user_id = :admin"),
+        {"lid": lib_id, "admin": admin_id},
     )
     logger.info(
         "[MIGRATION] Created default library '%s' (collection=%s); backfilled %s document(s).",

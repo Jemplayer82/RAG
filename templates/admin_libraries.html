@@ -56,10 +56,9 @@ function showAlert(msg, type = 'success') {
   setTimeout(() => alertBox.classList.add('d-none'), 5000);
 }
 
-function escapeHtml(text) {
-  const div = document.createElement('div');
-  div.textContent = text == null ? '' : text;
-  return div.innerHTML;
+function escapeHtml(s) {
+  // Quote-aware: safe for both element text AND attribute contexts (data-name).
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
 // Admin gate — only admins may manage libraries.
