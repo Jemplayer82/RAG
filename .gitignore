@@ -62,3 +62,6 @@ Thumbs.db
 .DS_Store
 # transient scan artifact
 .planning/semgrep-results.json
+
+# Claude Code session data
+.claude/
