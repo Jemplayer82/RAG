@@ -56,6 +56,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Write .env
+        run: |
+          printf 'POSTGRES_PASSWORD=%s\nDATA_ROOT=/storage/rag\n' \
+            "$POSTGRES_PASSWORD" > .env
+        env:
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+
       - name: Ensure data directories exist
         run: |
           DATA_ROOT="${DATA_ROOT:-/storage/rag}"
