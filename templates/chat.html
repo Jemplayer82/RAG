@@ -2,11 +2,11 @@
 {% block title %}Chat — rag{% endblock %}
 
 {% block content %}
-<div style="flex:1;display:flex;flex-direction:column;padding:16px;gap:14px;max-width:1280px;width:100%;margin:0 auto;height:calc(100vh - 104px);box-sizing:border-box;">
+<div style="flex:1;display:flex;flex-direction:column;padding:22px 16px 16px;gap:14px;max-width:1280px;width:100%;margin:0 auto;height:calc(100vh - 104px);box-sizing:border-box;">
   <div style="display:grid;grid-template-columns:1fr 320px;gap:14px;flex:1;min-height:0;">
 
     <!-- Chat panel -->
-    <div class="fc-panel" style="display:flex;flex-direction:column;padding:0;overflow:hidden;">
+    <div class="fc-panel" style="display:flex;flex-direction:column;padding:0;overflow:visible;">
       <span class="fc-panel__title" style="top:-10px;">[ knowledge base ]</span>
       <div style="padding:12px 16px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;flex-shrink:0;">
         <span style="font-size:9px;letter-spacing:1.5px;color:var(--text-muted);text-transform:uppercase;">RAG &middot; GROUNDED ANSWERS</span>
@@ -18,7 +18,7 @@
           <div style="font-size:13px;">Ask a question about your documents.</div>
         </div>
       </div>
-      <div style="border-top:1px solid var(--line);padding:12px 14px;display:flex;gap:8px;align-items:center;flex-shrink:0;background:var(--surface-panel);">
+      <div style="border-top:1px solid var(--line);padding:12px 14px;display:flex;gap:8px;align-items:center;flex-shrink:0;background:var(--surface-panel);border-bottom-left-radius:var(--radius-md);border-bottom-right-radius:var(--radius-md);">
         <span style="color:var(--buy-2);font-size:14px;">&gt;</span>
         <form id="queryForm" style="flex:1;display:flex;gap:8px;margin:0;">
           <input class="fc-input" type="text" id="questionInput"
@@ -31,7 +31,7 @@
     </div>
 
     <!-- Sources panel -->
-    <div class="fc-panel" style="display:flex;flex-direction:column;padding:0;overflow:hidden;">
+    <div class="fc-panel" style="display:flex;flex-direction:column;padding:0;overflow:visible;">
       <span class="fc-panel__title">[ cited sources ]</span>
       <div style="padding:8px 12px;border-bottom:1px solid var(--line);font-size:9px;letter-spacing:1.5px;color:var(--text-muted);flex-shrink:0;text-transform:uppercase;">Retrieval depth</div>
       <div id="sourcesPanel" style="flex:1;overflow-y:auto;padding:12px 10px;">
