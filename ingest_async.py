@@ -37,13 +37,21 @@ EMBED_DIM = 1024
 
 class QdrantManager:
     """
-    Wraps Qdrant client operations scoped to a single user's collection.
-    Collection name format: user_{user_id}
+    Wraps Qdrant client operations scoped to a single collection.
+
+    Pass an explicit ``collection_name`` (a library's backing collection), or a
+    ``user_id`` for the legacy ``user_{user_id}`` naming. One of the two is
+    required.
     """
 
-    def __init__(self, user_id: int):
+    def __init__(self, user_id: int = None, collection_name: str = None):
+        if collection_name:
+            self.collection_name = collection_name
+        elif user_id is not None:
+            self.collection_name = f"user_{user_id}"
+        else:
+            raise ValueError("QdrantManager requires user_id or collection_name")
         self.user_id = user_id
-        self.collection_name = f"user_{user_id}"
         self.client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
         # NOTE: the collection is created lazily on first upsert with the
         # embedding model's ACTUAL dimension (see upsert_chunks). Creating it
@@ -222,6 +230,7 @@ def run_ingestion_job(
     job_id: Optional[int] = None,
     url: str = "",
     doc_id_prefix: str = "",
+    collection_name: Optional[str] = None,
     crawl: bool = False,
     max_depth: int = 2,
     max_pages: int = 20,
@@ -262,9 +271,10 @@ def run_ingestion_job(
         if not chunks:
             raise ValueError(f"No content extracted from {title}")
 
-        # Embed and store in Qdrant (cached embedder)
+        # Embed and store in Qdrant (cached embedder). Target the library's
+        # collection when provided; fall back to the legacy per-user collection.
         embedder = _get_worker_embedder()
-        qm = QdrantManager(user_id=user_id)
+        qm = QdrantManager(user_id=user_id, collection_name=collection_name)
 
         if not doc_id_prefix:
             doc_id_prefix = f"{doc_type}_{title.lower().replace(' ', '_')}"

@@ -59,6 +59,7 @@ from pydantic import BaseModel
 from redis import Redis
 from rq import Queue
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 from werkzeug.utils import secure_filename
 
 from config import (
@@ -66,8 +67,8 @@ from config import (
     DEBUG, CACHE_ROOT, REDIS_URL
 )
 from models import (
-    User, Document, IngestionJob, LLMProviderConfig,
-    get_session_local, init_db, encrypt_api_key
+    User, Document, IngestionJob, LLMProviderConfig, Library,
+    get_session_local, init_db, encrypt_api_key, ensure_default_library
 )
 from rag_async import query_async
 from ingest_async import QdrantManager, run_ingestion_job
@@ -153,10 +154,21 @@ def require_admin(user: User = Depends(get_current_user)) -> User:
 
 def get_admin_user_id(db: Session) -> int:
     """Return the first admin user's ID for public queries. Raises 503 if none exists."""
-    admin = db.query(User).filter(User.is_admin == True).first()
+    admin = db.query(User).filter(User.is_admin == True).order_by(User.id).first()
     if not admin:
         raise HTTPException(status_code=503, detail="No admin account configured yet. Please set up an admin user.")
     return admin.id
+
+
+def _get_admin_library(db: Session, admin_id: int, library_id: int) -> Library:
+    """Fetch a library by id, scoped to the admin who owns it. Raises 404 otherwise."""
+    lib = db.query(Library).filter(
+        Library.id == library_id,
+        Library.owner_id == admin_id,
+    ).first()
+    if not lib:
+        raise HTTPException(status_code=404, detail="Library not found")
+    return lib
 
 
 # ============================================================================
@@ -200,6 +212,12 @@ class Token(BaseModel):
 class ChatRequest(BaseModel):
     question: str
     chat_history: Optional[list] = []
+    library_id: Optional[int] = None
+
+
+class LibraryCreate(BaseModel):
+    name: str
+    description: Optional[str] = ""
 
 
 class LLMSettingsUpdate(BaseModel):
@@ -290,6 +308,11 @@ async def settings_page(request: Request):
     return templates.TemplateResponse("settings.html", {"request": request})
 
 
+@app.get("/admin/libraries", response_class=HTMLResponse)
+async def admin_libraries_page(request: Request):
+    return templates.TemplateResponse("admin_libraries.html", {"request": request})
+
+
 # ============================================================================
 # ROUTES: Auth
 # ============================================================================
@@ -332,6 +355,15 @@ async def register(user_data: UserCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(user)
     logger.info(f"[AUTH] Registered: {user.username}{' (admin)' if is_admin else ''}")
+
+    # Fresh install: give the new admin a starter library so the app is usable
+    # immediately (chat/upload need at least one library to target).
+    if is_admin:
+        try:
+            ensure_default_library(db, user)
+        except Exception as e:
+            logger.error("[AUTH] Failed to create starter library: %s", e)
+
     return user
 
 
@@ -359,14 +391,29 @@ async def get_me(user: User = Depends(get_current_user)):
 
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    """Authenticated chat — queries the shared admin-curated document collection."""
+    """Authenticated chat — queries one selected library's collection."""
     if not req.question.strip():
         raise HTTPException(status_code=400, detail="Question cannot be empty")
     admin_id = get_admin_user_id(db)
+
+    # Resolve which library (collection) to search. Explicit choice wins;
+    # otherwise default to the oldest library (the adopted original corpus).
+    if req.library_id is not None:
+        lib = _get_admin_library(db, admin_id, req.library_id)
+    else:
+        lib = (
+            db.query(Library)
+            .filter(Library.owner_id == admin_id)
+            .order_by(Library.created_at.asc())
+            .first()
+        )
+    if not lib:
+        raise HTTPException(status_code=503, detail="No libraries configured yet.")
+
     try:
         result = await query_async(
             question=req.question,
-            user_id=admin_id,
+            collection_name=lib.collection_name,
             chat_history=req.chat_history
         )
         return result
@@ -383,10 +430,18 @@ async def chat(req: ChatRequest, user: User = Depends(get_current_user), db: Ses
 # ============================================================================
 
 @app.get("/api/library")
-async def get_library(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    """Authenticated library — lists the shared admin-curated document collection."""
+async def get_library(
+    library_id: Optional[int] = None,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Authenticated library — lists the admin-curated documents, optionally
+    filtered to a single library via ?library_id."""
     admin_id = get_admin_user_id(db)
-    docs = db.query(Document).filter(Document.user_id == admin_id).order_by(Document.created_at.desc()).all()
+    q = db.query(Document).filter(Document.user_id == admin_id)
+    if library_id is not None:
+        q = q.filter(Document.library_id == library_id)
+    docs = q.order_by(Document.created_at.desc()).all()
     return {
         "documents": [
             {
@@ -395,12 +450,126 @@ async def get_library(user: User = Depends(get_current_user), db: Session = Depe
                 "doc_type": d.doc_type,
                 "url": d.url,
                 "chunks": d.chunks,
+                "library_id": d.library_id,
                 "created_at": d.created_at.isoformat(),
             }
             for d in docs
         ],
         "total": len(docs)
     }
+
+
+# ============================================================================
+# ROUTES: Libraries
+# ============================================================================
+
+@app.get("/api/libraries")
+async def list_libraries(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """List the admin's libraries (oldest first) with a per-library document count.
+    Available to any authenticated user — the chat selector needs it."""
+    admin_id = get_admin_user_id(db)
+    libs = (
+        db.query(Library)
+        .filter(Library.owner_id == admin_id)
+        .order_by(Library.created_at.asc())
+        .all()
+    )
+    # Self-heal: if the admin somehow has no library (e.g. a swallowed failure
+    # during first-admin registration), create the starter one now. Idempotent.
+    if not libs:
+        admin = db.query(User).filter(User.id == admin_id).first()
+        if admin:
+            ensure_default_library(db, admin)
+            libs = (
+                db.query(Library)
+                .filter(Library.owner_id == admin_id)
+                .order_by(Library.created_at.asc())
+                .all()
+            )
+    out = []
+    for lib in libs:
+        count = db.query(Document).filter(Document.library_id == lib.id).count()
+        out.append({
+            "id": lib.id,
+            "name": lib.name,
+            "description": lib.description or "",
+            "document_count": count,
+            "created_at": lib.created_at.isoformat(),
+        })
+    return {"libraries": out, "total": len(out)}
+
+
+@app.post("/api/admin/libraries")
+async def create_library(
+    payload: LibraryCreate,
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Create a new library (admin only). Its Qdrant collection is created lazily
+    on first upload."""
+    name = (payload.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Library name cannot be empty")
+    dup = db.query(Library).filter(
+        Library.owner_id == user.id, Library.name == name
+    ).first()
+    if dup:
+        raise HTTPException(status_code=409, detail="A library with that name already exists")
+
+    # Insert with a placeholder collection_name, then derive the stable
+    # lib_{id} name once we have the primary key.
+    lib = Library(owner_id=user.id, name=name,
+                  description=(payload.description or "").strip(), collection_name="")
+    db.add(lib)
+    db.flush()
+    lib.collection_name = f"lib_{lib.id}"
+    try:
+        db.commit()
+    except IntegrityError:
+        # Lost a race against a concurrent create with the same name.
+        db.rollback()
+        raise HTTPException(status_code=409, detail="A library with that name already exists")
+    db.refresh(lib)
+    logger.info("[LIBRARY] Created '%s' (collection=%s) by %s", lib.name, lib.collection_name, user.username)
+    return {"id": lib.id, "name": lib.name, "collection_name": lib.collection_name}
+
+
+@app.delete("/api/admin/libraries/{library_id}")
+async def delete_library(
+    library_id: int,
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Delete a library: drop its Qdrant collection and remove its documents/jobs.
+    Refuses to delete the last remaining library."""
+    lib = _get_admin_library(db, user.id, library_id)
+    total = db.query(Library).filter(Library.owner_id == user.id).count()
+    if total <= 1:
+        raise HTTPException(status_code=409, detail="Cannot delete the only library. Create another first.")
+
+    collection = lib.collection_name
+    name = lib.name
+
+    # Remove documents (their ingestion jobs cascade via Document.jobs), then the
+    # library — and COMMIT before touching Qdrant. Dropping the collection is the
+    # irreversible side effect, so it must come last: if the DB delete fails we
+    # don't want a library left pointing at a vaporized collection.
+    docs = db.query(Document).filter(Document.library_id == lib.id).all()
+    doc_count = len(docs)
+    for d in docs:
+        db.delete(d)
+    db.delete(lib)
+    db.commit()
+
+    # Postgres is consistent now — drop the whole Qdrant collection (1:1).
+    try:
+        qm = QdrantManager(collection_name=collection)
+        await asyncio.to_thread(qm.client.delete_collection, collection)
+    except Exception as e:
+        logger.warning("[LIBRARY] Qdrant collection drop warning for %s: %s", collection, e)
+
+    logger.info("[LIBRARY] Deleted '%s' (%d docs) by %s", name, doc_count, user.username)
+    return {"status": "deleted", "id": library_id, "documents_removed": doc_count}
 
 
 # ============================================================================
@@ -418,16 +587,20 @@ async def add_source(
     max_pages: int = Form(20),
     same_domain_only: bool = Form(True),
     respect_robots: bool = Form(False),
+    library_id: int = Form(...),
     user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     """
-    Add a new source (PDF, TXT, or URL).
+    Add a new source (PDF, TXT, or URL) to a chosen library.
     File is saved immediately; ingestion is queued as a background job.
     Returns job_id for status polling.
     """
     if not title.strip():
         raise HTTPException(status_code=400, detail="Title is required")
+
+    # Validate the target library belongs to this admin.
+    lib = _get_admin_library(db, user.id, library_id)
 
     doc_type = type.lower()
     file_path = ""
@@ -472,7 +645,8 @@ async def add_source(
     else:
         raise HTTPException(status_code=400, detail="Invalid source type or missing file/URL")
 
-    # Create Document record (chunks=0 until job completes)
+    # Create Document record (chunks=0 until job completes). It belongs to the
+    # chosen library; qdrant_collection mirrors the library's collection.
     doc = Document(
         user_id=user.id,
         title=title,
@@ -480,7 +654,8 @@ async def add_source(
         url=source_url,
         cached_path=file_path,
         chunks=0,
-        qdrant_collection=f"user_{user.id}"
+        library_id=lib.id,
+        qdrant_collection=lib.collection_name,
     )
     db.add(doc)
     db.commit()
@@ -501,6 +676,7 @@ async def add_source(
     document_id = doc.id
     job_record_id = job_record.id
     owner_id = user.id
+    collection_name = lib.collection_name
 
     # Enqueue background job in Redis RQ (falls back to inline on Windows/no Redis)
     use_inline = False
@@ -517,6 +693,7 @@ async def add_source(
                 "job_id": job_record_id,
                 "url": source_url,
                 "doc_id_prefix": doc_id_prefix,
+                "collection_name": collection_name,
                 "crawl": crawl,
                 "max_depth": max_depth,
                 "max_pages": max_pages,
@@ -549,6 +726,7 @@ async def add_source(
                     file_path=file_path, title=title, doc_type=doc_type,
                     user_id=owner_id, document_id=document_id, job_id=job_record_id,
                     url=source_url, doc_id_prefix=doc_id_prefix,
+                    collection_name=collection_name,
                     crawl=crawl, max_depth=max_depth, max_pages=max_pages,
                     same_domain_only=same_domain_only, respect_robots=respect_robots,
                 )
@@ -660,9 +838,16 @@ async def delete_source(
 
     # Remove from Qdrant using the same stable, unique prefix used at ingest
     # time (doc_{id}) — never reconstruct from the title (collisions/orphans).
+    # Resolve the collection from the doc's library; fall back to the stored
+    # collection name (then legacy per-user) for rows predating libraries.
+    collection = doc.qdrant_collection or f"user_{user.id}"
+    if doc.library_id:
+        lib = db.query(Library).filter(Library.id == doc.library_id).first()
+        if lib:
+            collection = lib.collection_name
     doc_id_prefix = f"doc_{doc.id}"
     try:
-        qm = QdrantManager(user_id=user.id)
+        qm = QdrantManager(collection_name=collection)
         await asyncio.to_thread(qm.delete_document, doc_id_prefix)
     except Exception as e:
         logger.warning(f"[SOURCES] Qdrant delete warning: {e}")

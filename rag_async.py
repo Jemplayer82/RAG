@@ -61,13 +61,13 @@ def _get_embedder() -> SentenceTransformer:
 # RETRIEVAL: Semantic search + BM25 re-ranking (per user)
 # ============================================================================
 
-def _retrieve_sources_sync(question: str, user_id: int, k: int = TOP_K) -> List[Dict]:
+def _retrieve_sources_sync(question: str, collection_name: str, k: int = TOP_K) -> List[Dict]:
     """
     Sync retrieval: semantic search in Qdrant + BM25 re-ranking.
     Wrapped in asyncio.to_thread() for async use.
     """
     embedder = _get_embedder()
-    qm = QdrantManager(user_id=user_id)
+    qm = QdrantManager(collection_name=collection_name)
 
     # Embed query
     query_vector = embedder.encode(question, convert_to_tensor=False).tolist()
@@ -76,7 +76,7 @@ def _retrieve_sources_sync(question: str, user_id: int, k: int = TOP_K) -> List[
     raw_results = qm.search(query_vector, top_k=k)
 
     if not raw_results:
-        logger.warning(f"[RAG] No results for user {user_id}")
+        logger.warning(f"[RAG] No results in collection {collection_name}")
         return []
 
     # BM25 re-ranking, fused with the semantic score.
@@ -105,7 +105,7 @@ def _retrieve_sources_sync(question: str, user_id: int, k: int = TOP_K) -> List[
         top_indices = [0]
 
     sources = [raw_results[i] for i in top_indices if i < len(raw_results)]
-    logger.info(f"[RAG] Retrieved {len(sources)} sources for user {user_id}")
+    logger.info(f"[RAG] Retrieved {len(sources)} sources from {collection_name}")
     return sources
 
 
@@ -146,7 +146,7 @@ async def _call_llm_async(prompt: str) -> str:
 
 async def query_async(
     question: str,
-    user_id: int,
+    collection_name: str,
     chat_history: Optional[List[Dict]] = None
 ) -> Dict:
     """
@@ -154,16 +154,16 @@ async def query_async(
 
     Args:
         question: User's natural language question
-        user_id: ID of the authenticated user (for Qdrant namespace)
+        collection_name: Qdrant collection to search (the selected library)
         chat_history: Previous messages (optional, for context)
 
     Returns:
         Dict with keys: answer, sources, metadata
     """
-    logger.info(f"[RAG] Query from user {user_id}: {question[:80]}")
+    logger.info(f"[RAG] Query against {collection_name}: {question[:80]}")
 
     # Retrieve in thread pool (blocking I/O)
-    sources = await asyncio.to_thread(_retrieve_sources_sync, question, user_id, TOP_K)
+    sources = await asyncio.to_thread(_retrieve_sources_sync, question, collection_name, TOP_K)
 
     if not sources:
         return {

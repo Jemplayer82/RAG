@@ -8,7 +8,7 @@ import os
 from datetime import datetime
 from sqlalchemy import (
     create_engine, Column, Integer, String, DateTime,
-    ForeignKey, Text, Boolean, Float
+    ForeignKey, Text, Boolean, Float, UniqueConstraint, text
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
@@ -102,10 +102,12 @@ class Document(Base):
     url = Column(Text, default="")
     cached_path = Column(Text, default="")
     chunks = Column(Integer, default=0)
-    qdrant_collection = Column(String(128), nullable=False)  # e.g. "user_3"
+    qdrant_collection = Column(String(128), nullable=False)  # denormalized cache of library.collection_name
+    library_id = Column(Integer, ForeignKey("libraries.id"), nullable=True, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     owner = relationship("User", back_populates="documents")
+    library = relationship("Library", back_populates="documents")
     jobs = relationship("IngestionJob", back_populates="document", cascade="all, delete-orphan")
 
 
@@ -123,6 +125,31 @@ class IngestionJob(Base):
 
     owner = relationship("User", back_populates="jobs")
     document = relationship("Document", back_populates="jobs")
+
+
+class Library(Base):
+    """
+    A named document collection. Each library maps 1:1 to a Qdrant collection
+    (collection_name). The admin creates libraries and adds documents to a chosen
+    one; chat queries exactly one library at a time.
+    """
+    __tablename__ = "libraries"
+
+    id = Column(Integer, primary_key=True, index=True)
+    owner_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    name = Column(String(128), nullable=False)
+    description = Column(Text, default="")
+    # Qdrant collection backing this library. The original library adopts the
+    # legacy "user_{admin_id}" collection (zero-loss); new ones use "lib_{id}".
+    collection_name = Column(String(128), unique=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (UniqueConstraint("owner_id", "name", name="uq_library_owner_name"),)
+
+    owner = relationship("User")
+    # No cascade: deleting a library also drops its Qdrant collection, which is
+    # coordinated explicitly in the delete route (an ORM cascade can't do that).
+    documents = relationship("Document", back_populates="library")
 
 
 class LLMProviderConfig(Base):
@@ -146,6 +173,12 @@ class LLMProviderConfig(Base):
 # DB INIT HELPERS
 # ============================================================================
 
+# Name given to the library that adopts the pre-v1.2 single knowledge base.
+DEFAULT_ADOPTED_LIBRARY_NAME = "Spinal Cord Injury"
+# Name for the starter library created on a fresh install at admin registration.
+FRESH_INSTALL_LIBRARY_NAME = "My Library"
+
+
 def get_engine():
     return create_engine(DATABASE_URL, pool_pre_ping=True)
 
@@ -155,11 +188,94 @@ def get_session_local():
     return sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
+def ensure_default_library(db, admin):
+    """
+    Guarantee the given admin has at least one library, creating a starter one
+    (backed by the legacy per-user collection) if none exists. Idempotent.
+    Called at first-admin registration so a fresh install is usable immediately.
+    Returns the admin's first library.
+    """
+    existing = (
+        db.query(Library)
+        .filter(Library.owner_id == admin.id)
+        .order_by(Library.created_at.asc())
+        .first()
+    )
+    if existing:
+        return existing
+    lib = Library(
+        owner_id=admin.id,
+        name=FRESH_INSTALL_LIBRARY_NAME,
+        description="Starter library.",
+        collection_name=f"user_{admin.id}",
+    )
+    db.add(lib)
+    db.commit()
+    db.refresh(lib)
+    logger.info("[LIBRARY] Created starter library '%s' (collection=%s) for admin %s",
+                FRESH_INSTALL_LIBRARY_NAME, lib.collection_name, admin.id)
+    return lib
+
+
+# Arbitrary constant key for the Postgres advisory lock that serializes schema
+# init + migration across the multiple Gunicorn workers (each runs lifespan).
+_SCHEMA_LOCK_KEY = 0x52474C49  # "RGLI"
+
+
+def _init_schema_locked(conn):
+    """
+    Create tables, add the v1.2 `documents.library_id` column, and adopt any
+    pre-existing corpus as the first library — all on a single connection that
+    holds the advisory lock, so concurrent workers can't race each other.
+
+    Idempotent: safe on every boot, on a fresh empty DB, and before any admin
+    exists. Raw SQL for the seed avoids ORM-session complications inside the
+    locked transaction. Postgres-specific (ADD COLUMN IF NOT EXISTS, advisory lock).
+    """
+    # create_all builds the new `libraries` table; it never alters the existing
+    # `documents` table, so we add `library_id` by hand. We deliberately skip a
+    # raw FK constraint: fresh DBs get it from create_all, existing prod relies
+    # on app-level validation — adding it here would double-up on fresh DBs.
+    Base.metadata.create_all(bind=conn)
+    conn.execute(text("ALTER TABLE documents ADD COLUMN IF NOT EXISTS library_id INTEGER"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_documents_library_id ON documents (library_id)"))
+
+    if conn.execute(text("SELECT 1 FROM libraries LIMIT 1")).first() is not None:
+        return  # already seeded — idempotent bail
+    admin = conn.execute(
+        text("SELECT id FROM users WHERE is_admin = true ORDER BY id LIMIT 1")
+    ).first()
+    if admin is None:
+        logger.info("[MIGRATION] No admin yet; deferring default-library seed.")
+        return
+    admin_id = admin[0]
+    collection = f"user_{admin_id}"  # adopt the existing collection in place
+    conn.execute(
+        text("INSERT INTO libraries (owner_id, name, description, collection_name, created_at) "
+             "VALUES (:o, :n, :d, :c, now())"),
+        {"o": admin_id, "n": DEFAULT_ADOPTED_LIBRARY_NAME,
+         "d": "Adopted from the original knowledge base.", "c": collection},
+    )
+    lib_id = conn.execute(
+        text("SELECT id FROM libraries WHERE owner_id = :o AND name = :n"),
+        {"o": admin_id, "n": DEFAULT_ADOPTED_LIBRARY_NAME},
+    ).first()[0]
+    res = conn.execute(
+        text("UPDATE documents SET library_id = :lid "
+             "WHERE library_id IS NULL AND user_id = :admin"),
+        {"lid": lib_id, "admin": admin_id},
+    )
+    logger.info(
+        "[MIGRATION] Created default library '%s' (collection=%s); backfilled %s document(s).",
+        DEFAULT_ADOPTED_LIBRARY_NAME, collection, res.rowcount,
+    )
+
+
 def init_db(max_attempts: int = 60, delay: float = 1.0):
     """
-    Create all tables. Retries on transient connection errors so the app can
-    ride out the startup window where Postgres is ready but the Docker DNS or
-    database creation hasn't finished propagating yet.
+    Wait for Postgres, then run schema creation + the v1.2 library migration
+    inside a single advisory-locked transaction. The lock serializes startup
+    across Gunicorn workers so they can't race (each worker runs the lifespan).
     """
     import time
 
@@ -167,10 +283,9 @@ def init_db(max_attempts: int = 60, delay: float = 1.0):
     last_error = None
     for attempt in range(1, max_attempts + 1):
         try:
-            Base.metadata.create_all(bind=engine)
-            if attempt > 1:
-                logger.info("DB schema initialized on attempt %d/%d", attempt, max_attempts)
-            return
+            with engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+            break
         except Exception as e:
             last_error = e
             logger.warning(
@@ -178,7 +293,19 @@ def init_db(max_attempts: int = 60, delay: float = 1.0):
                 attempt, max_attempts, type(e).__name__,
             )
             time.sleep(delay)
-    raise RuntimeError(
-        f"Could not connect to the database after {max_attempts} attempts. "
-        f"Last error: {last_error}"
-    )
+    else:
+        raise RuntimeError(
+            f"Could not connect to the database after {max_attempts} attempts. "
+            f"Last error: {last_error}"
+        )
+
+    # Connected. Serialize schema init + migration with a transaction-scoped
+    # advisory lock; concurrent workers block here, then see the work is done
+    # and bail. Fail loudly on a real migration error.
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": _SCHEMA_LOCK_KEY})
+            _init_schema_locked(conn)
+    except Exception as e:
+        logger.error("[MIGRATION] Schema init/migration FAILED: %s", e, exc_info=True)
+        raise

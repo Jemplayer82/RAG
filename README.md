@@ -8,9 +8,10 @@
 
 ## `[ what it does ]`
 
-- Upload PDFs, text files, or web URLs into a shared document library
-- Chat with an AI assistant that answers questions using only your documents, with source citations
-- Admin-managed shared library — only the admin adds or removes sources, but all authenticated users can query them
+- Organize documents into **named, isolated libraries** — keep unrelated corpora separate (e.g. "Spinal Cord Injury", "Jones Act Cases")
+- Upload PDFs, text files, or web URLs into any library you choose
+- Chat with an AI assistant that searches one library at a time, answering questions using only its documents, with source citations
+- Admin-managed libraries — only the admin adds, removes, or creates collections; all authenticated users can pick a library and query it
 - Switch between local (Ollama) and cloud LLM providers (OpenAI, Anthropic, or any OpenAI-compatible endpoint) from the admin UI
 
 ---
@@ -20,7 +21,7 @@
 | Component | Technology |
 |-----------|------------|
 | Backend | FastAPI + Gunicorn (async workers) |
-| Vector database | Qdrant (per-user collections) |
+| Vector database | Qdrant (isolated per-library collections) |
 | Auth database | PostgreSQL + SQLAlchemy |
 | Job queue | Redis + RQ (background ingestion) |
 | Embeddings | `BAAI/bge-large-en-v1.5` via sentence-transformers |
@@ -91,9 +92,27 @@ Make sure the host directories exist first (see Prerequisites), then:
 1. Register at `/register` — the first account is automatically promoted to admin
 2. Log in
 3. Visit `/admin/llm-settings` — select a provider and pull or configure a model
-4. Go to **Add Sources** and upload a PDF or enter a URL
-5. Wait for the ingestion job to finish (progress is visible in the upload UI)
-6. Open **Chat** and start asking questions
+4. Go to **Libraries** and create at least one library (e.g. "My Documents")
+5. Go to **Add Sources**, select the library, and upload a PDF or enter a URL
+6. Wait for the ingestion job to finish (progress is visible in the upload UI)
+7. Open **Chat**, pick a library from the dropdown, and start asking questions
+
+> [!NOTE]
+> On a fresh install, a starter library named "My Library" is created automatically when the first admin registers, so you can skip step 4 and go straight to adding sources.
+
+---
+
+## `[ libraries ]`
+
+Each library is an independent Qdrant collection — documents in different libraries never cross-contaminate. The admin creates and manages libraries; any authenticated user can choose which one to query.
+
+**Common workflows:**
+
+- Admin creates a "Spinal Cord Injury" library and a "Jones Act" library
+- Uploads the relevant documents to each
+- Users pick a library in the Chat header before asking questions — only that library's documents are searched
+
+**Persistence:** Library data (vectors, documents, uploaded files) is stored on bind-mounted host paths and survives container rebuilds, image updates, and `docker compose down`.
 
 ---
 
@@ -126,8 +145,8 @@ Browser
 │
 ▼
 FastAPI app (:8000) ← the only host-published service
-├── PostgreSQL         ← users, documents, job records
-├── Qdrant             ← vector collections
+├── PostgreSQL         ← users, libraries, documents, job records
+├── Qdrant             ← isolated per-library vector collections
 ├── Redis → rag-worker ← background document ingestion
 └── Ollama             ← local LLM inference
 ```

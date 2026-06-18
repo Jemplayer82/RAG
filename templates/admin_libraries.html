@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+{% block title %}Admin — Libraries — rag{% endblock %}
+
+{% block content %}
+<div class="rag-main rag-container">
+
+  <div id="alertBox" class="d-none" role="alert" style="margin-bottom:16px;"></div>
+
+  <div style="display:flex;flex-direction:column;gap:18px;max-width:920px;">
+
+    <!-- Create library -->
+    <section class="fc-panel">
+      <span class="fc-panel__title">[ create library ]</span>
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:16px;line-height:1.7;">
+        Each library is an isolated collection of documents. Add sources to a chosen
+        library, then pick which one to query on the Chat page.
+      </div>
+      <form id="createForm" style="display:grid;grid-template-columns:1fr 1fr auto;gap:12px;align-items:end;">
+        <div class="fc-field">
+          <label class="fc-field__label" for="libName">Name</label>
+          <input class="fc-input" type="text" id="libName" name="name" required
+                 maxlength="128" autocomplete="off" placeholder="e.g. Jones Act Cases">
+        </div>
+        <div class="fc-field">
+          <label class="fc-field__label" for="libDesc">Description <span style="opacity:.6;">(optional)</span></label>
+          <input class="fc-input" type="text" id="libDesc" name="description"
+                 autocomplete="off" placeholder="Short note about this library">
+        </div>
+        <button type="submit" class="fc-btn fc-btn--primary">Create library</button>
+      </form>
+    </section>
+
+    <!-- Existing libraries -->
+    <section class="fc-panel">
+      <span class="fc-panel__title">[ libraries ]</span>
+      <div id="librariesWrap">
+        <div style="font-size:12px;color:var(--text-muted);">Loading&hellip;</div>
+      </div>
+    </section>
+
+  </div>
+</div>
+
+<script>
+const token = localStorage.getItem('rag_token');
+if (!token) { window.location.href = '/login'; }
+
+const alertBox = document.getElementById('alertBox');
+const wrap = document.getElementById('librariesWrap');
+
+function showAlert(msg, type = 'success') {
+  const typeMap = { success: 'alert alert-success', danger: 'alert alert-danger', info: 'alert alert-info', warning: 'alert alert-warning' };
+  alertBox.className = typeMap[type] || 'alert alert-info';
+  alertBox.textContent = msg;
+  alertBox.classList.remove('d-none');
+  setTimeout(() => alertBox.classList.add('d-none'), 5000);
+}
+
+function escapeHtml(s) {
+  // Quote-aware: safe for both element text AND attribute contexts (data-name).
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+// Admin gate — only admins may manage libraries.
+async function gateAdmin() {
+  try {
+    const resp = await fetch('/api/auth/me', { headers: { 'Authorization': `Bearer ${token}` } });
+    if (!resp.ok) { window.location.href = '/login'; return false; }
+    const user = await resp.json();
+    if (!user.is_admin) {
+      document.body.innerHTML = '<div style="padding:40px;color:var(--sell);">Access denied — admin only.</div>';
+      return false;
+    }
+    return true;
+  } catch (e) { window.location.href = '/login'; return false; }
+}
+
+async function loadLibraries() {
+  try {
+    const resp = await fetch('/api/libraries', { headers: { 'Authorization': `Bearer ${token}` } });
+    if (!resp.ok) { wrap.innerHTML = '<div class="alert alert-warning">Could not load libraries.</div>'; return; }
+    const data = await resp.json();
+    const libs = data.libraries || [];
+    if (libs.length === 0) {
+      wrap.innerHTML = '<div style="font-size:12px;color:var(--text-muted);">No libraries yet. Create one above.</div>';
+      return;
+    }
+    const onlyOne = libs.length === 1;
+    const rows = libs.map(l => `
+      <tr>
+        <td>${escapeHtml(l.name)}</td>
+        <td style="color:var(--text-muted);">${escapeHtml(l.description) || '&mdash;'}</td>
+        <td>${l.document_count}</td>
+        <td style="color:var(--text-muted);font-size:11px;">${escapeHtml(new Date(l.created_at).toLocaleString())}</td>
+        <td style="text-align:right;">
+          <button class="btn btn-sm btn-outline-danger" data-delete="${l.id}" data-name="${escapeHtml(l.name)}"
+                  ${onlyOne ? 'disabled title="Cannot delete the only library"' : ''}>remove</button>
+        </td>
+      </tr>`).join('');
+    wrap.innerHTML = `<table class="rag-table" style="width:100%;"><thead><tr>
+        <th>Name</th><th>Description</th><th>Documents</th><th>Created</th><th style="text-align:right;">Actions</th>
+      </tr></thead><tbody>${rows}</tbody></table>`;
+    wrap.querySelectorAll('button[data-delete]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const id = btn.dataset.delete;
+        if (!confirm(`Delete library "${btn.dataset.name}"? This permanently removes its documents and vectors.`)) return;
+        const r = await fetch(`/api/admin/libraries/${id}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } });
+        if (r.ok) { const d = await r.json(); showAlert(`Deleted "${btn.dataset.name}" (${d.documents_removed} document(s)).`); loadLibraries(); }
+        else { const e = await r.json().catch(() => ({})); showAlert(e.detail || 'Delete failed.', 'danger'); }
+      });
+    });
+  } catch (e) { wrap.innerHTML = `<div class="alert alert-warning">${escapeHtml(e.message)}</div>`; }
+}
+
+document.getElementById('createForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const name = document.getElementById('libName').value.trim();
+  const description = document.getElementById('libDesc').value.trim();
+  if (!name) return;
+  const resp = await fetch('/api/admin/libraries', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, description }),
+  });
+  if (resp.ok) {
+    showAlert(`Library "${name}" created.`);
+    document.getElementById('libName').value = '';
+    document.getElementById('libDesc').value = '';
+    loadLibraries();
+  } else {
+    const err = await resp.json().catch(() => ({}));
+    showAlert(err.detail || 'Could not create library.', 'danger');
+  }
+});
+
+(async () => { if (await gateAdmin()) loadLibraries(); })();
+</script>
+{% endblock %}
