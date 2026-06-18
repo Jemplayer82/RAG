@@ -58,7 +58,7 @@ jobs:
 
       - name: Write .env
         run: |
-          printf 'POSTGRES_PASSWORD=%s\nDATA_ROOT=/storage/rag\n' \
+          printf 'POSTGRES_PASSWORD=%s\nDATA_ROOT=/storage/rag\nRAG_PORT=8001\n' \
             "$POSTGRES_PASSWORD" > .env
         env:
           POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
