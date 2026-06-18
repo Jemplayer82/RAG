@@ -60,8 +60,8 @@ tmp/
 # OS
 Thumbs.db
 .DS_Store
-# transient scan artifact
-.planning/semgrep-results.json
+# GSD planning artifacts — internal process docs, not shipped publicly
+.planning/
 
 # Claude Code session data
 .claude/
