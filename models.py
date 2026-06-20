@@ -72,7 +72,14 @@ def encrypt_api_key(plain_key: str) -> str:
 
 
 def decrypt_api_key(encrypted_key: str) -> str:
-    return _get_cipher().decrypt(encrypted_key.encode()).decode()
+    try:
+        return _get_cipher().decrypt(encrypted_key.encode()).decode()
+    except Exception:
+        # Ciphertext is invalid (wrong ENCRYPTION_KEY, stored as plaintext, etc.).
+        # Return empty rather than crashing — providers that don't need a key
+        # (Ollama) still work; ones that do will fail with a clean auth error.
+        logger.warning("Key decryption failed (InvalidToken) — ENCRYPTION_KEY may have rotated; returning empty")
+        return ""
 
 Base = declarative_base()
 

@@ -1,0 +1,24 @@
+name: Fix LLM config (one-shot)
+on:
+  workflow_dispatch:
+
+jobs:
+  fix:
+    runs-on: [self-hosted]
+    steps:
+      - name: Clear bad api_key and show available Ollama models
+        run: |
+          echo "=== Available Ollama models ==="
+          docker exec rag-ollama-1 ollama list || echo "(ollama list failed)"
+
+          echo ""
+          echo "=== Current llm_provider_configs row ==="
+          docker exec rag-postgres-1 psql -U rag -d rag_db \
+            -c "SELECT id, provider, model, base_url, CASE WHEN api_key IS NULL THEN 'NULL' WHEN api_key = '' THEN 'EMPTY' ELSE 'SET' END AS api_key_status FROM llm_provider_configs;"
+
+          echo ""
+          echo "=== Clearing invalid api_key ==="
+          docker exec rag-postgres-1 psql -U rag -d rag_db \
+            -c "UPDATE llm_provider_configs SET api_key = NULL WHERE provider = 'ollama';"
+
+          echo "Done. Visit /admin/llm-settings to set the correct model."
