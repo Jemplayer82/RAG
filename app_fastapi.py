@@ -385,6 +385,15 @@ async def get_me(user: User = Depends(get_current_user)):
     return user
 
 
+@app.get("/api/current-model")
+async def get_current_model(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Active LLM provider + model name — readable by any authenticated user."""
+    config = db.query(LLMProviderConfig).first()
+    if config:
+        return {"provider": config.provider, "model": config.model or ""}
+    return {"provider": os.getenv("LLM_PROVIDER", "ollama"), "model": os.getenv("LLM_MODEL", "")}
+
+
 # ============================================================================
 # ROUTES: Chat
 # ============================================================================
@@ -952,6 +961,27 @@ async def update_llm_settings(
     db.commit()
     logger.info(f"[ADMIN] LLM config updated by {user.username}: provider={data.provider} model={data.model}")
     return {"status": "updated", "provider": data.provider, "model": data.model}
+
+
+@app.patch("/api/admin/llm-model")
+async def quick_update_llm_model(
+    data: dict,
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Quick model-only swap — keeps all other settings intact."""
+    model = (data.get("model") or "").strip()
+    if not model:
+        raise HTTPException(status_code=400, detail="model is required")
+    config = db.query(LLMProviderConfig).first()
+    if not config:
+        config = LLMProviderConfig(provider="ollama")
+        db.add(config)
+    config.model = model
+    config.updated_by_id = user.id
+    db.commit()
+    logger.info(f"[ADMIN] LLM model quick-switched to {model!r} by {user.username}")
+    return {"model": model}
 
 
 @app.get("/api/admin/embed-device")

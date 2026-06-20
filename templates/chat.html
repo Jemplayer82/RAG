@@ -8,6 +8,8 @@
     <!-- Chat panel -->
     <div class="fc-panel" style="display:flex;flex-direction:column;padding:0;overflow:visible;">
       <span class="fc-panel__title" style="top:-10px;">[ knowledge base ]</span>
+
+      <!-- Library row -->
       <div style="padding:12px 16px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;flex-shrink:0;gap:10px;">
         <div style="display:flex;align-items:center;gap:8px;min-width:0;">
           <span style="font-size:9px;letter-spacing:1.5px;color:var(--text-muted);text-transform:uppercase;white-space:nowrap;">Library</span>
@@ -15,6 +17,16 @@
         </div>
         <button class="fc-btn fc-btn--ghost fc-btn--sm" id="clearChatBtn">clear</button>
       </div>
+
+      <!-- Model row -->
+      <div style="padding:8px 16px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px;flex-shrink:0;">
+        <span style="font-size:9px;letter-spacing:1.5px;color:var(--text-muted);text-transform:uppercase;white-space:nowrap;">Model</span>
+        <!-- Admin view: editable dropdown; non-admin: static label -->
+        <select class="fc-select" id="chatModelSelect" style="font-size:11px;padding:4px 8px;max-width:280px;display:none;"></select>
+        <span id="chatModelLabel" style="font-size:11px;color:var(--text-muted);"></span>
+        <span id="modelSaveStatus" style="font-size:9px;color:var(--text-muted);margin-left:4px;"></span>
+      </div>
+
       <div id="chatHistory" style="flex:1;overflow-y:auto;padding:20px 16px;display:flex;flex-direction:column;gap:12px;">
         <div data-placeholder style="text-align:center;color:var(--text-muted);margin-top:40px;">
           <div style="font-size:28px;margin-bottom:10px;color:var(--sonar);">&#9675;</div>
@@ -219,6 +231,77 @@ chatLibrarySelect.addEventListener('change', () => {
     resetChat();  // a fresh library means a fresh conversation
 });
 loadChatLibraries();
+
+// ---- Model selector ----
+const chatModelSelect = document.getElementById('chatModelSelect');
+const chatModelLabel  = document.getElementById('chatModelLabel');
+const modelSaveStatus = document.getElementById('modelSaveStatus');
+
+async function loadModelSelector() {
+    const token = localStorage.getItem('rag_token'); // pragma: allowlist secret
+    const headers = { 'Authorization': 'Bearer ' + token };
+
+    // Always fetch the active model (works for any authenticated user)
+    let currentModel = '';
+    let currentProvider = 'ollama';
+    try {
+        const r = await fetch('/api/current-model', { headers });
+        if (r.ok) {
+            const d = await r.json();
+            currentModel = d.model || '';
+            currentProvider = d.provider || 'ollama';
+        }
+    } catch (e) { /* non-fatal */ }
+
+    // Try to get the full installed-model list (admin-only)
+    let ollamaModels = null;
+    if (currentProvider === 'ollama') {
+        try {
+            const r = await fetch('/api/admin/ollama/models', { headers });
+            if (r.ok) {
+                const d = await r.json();
+                ollamaModels = (d.models || []).map(m => m.name).filter(Boolean);
+            }
+        } catch (e) { /* non-admin or Ollama unreachable */ }
+    }
+
+    if (ollamaModels !== null) {
+        // Admin path: editable dropdown
+        chatModelLabel.style.display = 'none';
+        chatModelSelect.style.display = '';
+
+        // Ensure current model appears even if not in the list (stale or cloud model)
+        const options = ollamaModels.length ? ollamaModels : (currentModel ? [currentModel] : ['(no models loaded)']);
+        if (currentModel && !options.includes(currentModel)) options.unshift(currentModel);
+        chatModelSelect.innerHTML = options.map(m => `<option value="${m}">${escapeHtml(m)}</option>`).join('');
+        if (currentModel) chatModelSelect.value = currentModel;
+    } else {
+        // Non-admin or cloud provider: read-only label
+        chatModelSelect.style.display = 'none';
+        chatModelLabel.style.display = '';
+        chatModelLabel.textContent = currentModel || '—';
+    }
+}
+
+chatModelSelect.addEventListener('change', async () => {
+    const model = chatModelSelect.value;
+    if (!model || model === '(no models loaded)') return;
+    modelSaveStatus.textContent = 'saving…';
+    try {
+        const r = await fetch('/api/admin/llm-model', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + localStorage.getItem('rag_token') },
+            body: JSON.stringify({ model }),
+        });
+        if (!r.ok) throw new Error((await r.json()).detail || 'save failed');
+        modelSaveStatus.textContent = 'saved';
+        setTimeout(() => { modelSaveStatus.textContent = ''; }, 2000);
+    } catch (e) {
+        modelSaveStatus.textContent = 'error: ' + e.message;
+    }
+});
+
+loadModelSelector();
 
 document.getElementById('questionInput').focus();
 </script>
