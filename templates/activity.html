@@ -1,0 +1,161 @@
+{% extends "base.html" %}
+{% block title %}Activity — rag{% endblock %}
+
+{% block content %}
+<div class="rag-main rag-container">
+
+  <div id="alertBox" class="d-none" role="alert" style="margin-bottom:16px;"></div>
+
+  <div style="display:flex;flex-direction:column;gap:18px;max-width:1100px;">
+
+    <!-- Summary -->
+    <section class="fc-panel">
+      <span class="fc-panel__title">[ ingestion status ]</span>
+      <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap;">
+        <div id="summaryRow" style="display:flex;gap:28px;">
+          <div><div id="cntQueued"   style="font-size:26px;color:var(--foam-200);">&mdash;</div><div style="font-size:9px;letter-spacing:1.5px;color:var(--text-muted);text-transform:uppercase;">Queued</div></div>
+          <div><div id="cntRunning"  style="font-size:26px;color:var(--sonar);">&mdash;</div><div style="font-size:9px;letter-spacing:1.5px;color:var(--text-muted);text-transform:uppercase;">Processing</div></div>
+          <div><div id="cntComplete" style="font-size:26px;color:var(--buy-2);">&mdash;</div><div style="font-size:9px;letter-spacing:1.5px;color:var(--text-muted);text-transform:uppercase;">Complete</div></div>
+          <div><div id="cntError"    style="font-size:26px;color:var(--sell);">&mdash;</div><div style="font-size:9px;letter-spacing:1.5px;color:var(--text-muted);text-transform:uppercase;">Error</div></div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span id="liveDot" style="font-size:10px;color:var(--text-muted);">&#9679; live</span>
+          <button class="fc-btn fc-btn--danger fc-btn--sm" id="cancelBtn" style="display:none;">Cancel all pending</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Job list -->
+    <section class="fc-panel">
+      <span class="fc-panel__title">[ recent jobs ]</span>
+      <div id="jobsWrap">
+        <div style="font-size:12px;color:var(--text-muted);">Loading&hellip;</div>
+      </div>
+    </section>
+
+  </div>
+</div>
+
+<script>
+const token = localStorage.getItem('rag_token'); // pragma: allowlist secret
+if (!token) { window.location.href = '/login'; }
+
+const alertBox = document.getElementById('alertBox');
+const jobsWrap = document.getElementById('jobsWrap');
+const cancelBtn = document.getElementById('cancelBtn');
+let pollTimer = null;
+
+function showAlert(msg, type = 'success') {
+  const typeMap = { success: 'alert alert-success', danger: 'alert alert-danger', info: 'alert alert-info', warning: 'alert alert-warning' };
+  alertBox.className = typeMap[type] || 'alert alert-info';
+  alertBox.textContent = msg;
+  alertBox.classList.remove('d-none');
+  setTimeout(() => alertBox.classList.add('d-none'), 5000);
+}
+
+function escapeHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+async function gateAdmin() {
+  try {
+    const resp = await fetch('/api/auth/me', { headers: { 'Authorization': `Bearer ${token}` } });
+    if (!resp.ok) { window.location.href = '/login'; return false; }
+    const user = await resp.json();
+    if (!user.is_admin) {
+      document.body.innerHTML = '<div style="padding:40px;color:var(--sell);">Access denied — admin only.</div>';
+      return false;
+    }
+    return true;
+  } catch (e) { window.location.href = '/login'; return false; }
+}
+
+const STATUS_BADGE = {
+  queued:   'bg-secondary',
+  running:  'bg-info',
+  complete: 'bg-success',
+  error:    'bg-danger',
+};
+const STATUS_LABEL = { queued: 'queued', running: 'processing', complete: 'done', error: 'error' };
+
+function fmtTime(iso) {
+  if (!iso) return '';
+  try { return new Date(iso).toLocaleString(); } catch (e) { return ''; }
+}
+
+async function refresh() {
+  try {
+    const resp = await fetch('/api/sources/jobs', { headers: { 'Authorization': `Bearer ${token}` } });
+    if (resp.status === 401) { window.location.href = '/login'; return; }
+    if (!resp.ok) { return; }
+    const data = await resp.json();
+    const s = data.summary || {};
+    document.getElementById('cntQueued').textContent   = s.queued   ?? 0;
+    document.getElementById('cntRunning').textContent  = s.running  ?? 0;
+    document.getElementById('cntComplete').textContent = s.complete ?? 0;
+    document.getElementById('cntError').textContent    = s.error    ?? 0;
+
+    const pending = (s.queued || 0) + (s.running || 0);
+    cancelBtn.style.display = pending > 0 ? '' : 'none';
+
+    const jobs = data.jobs || [];
+    if (jobs.length === 0) {
+      jobsWrap.innerHTML = '<div style="font-size:12px;color:var(--text-muted);">No ingestion jobs yet.</div>';
+      return;
+    }
+    const rows = jobs.map(j => {
+      const badge = STATUS_BADGE[j.status] || 'bg-secondary';
+      const label = STATUS_LABEL[j.status] || j.status;
+      const err = j.status === 'error' && j.error ? `<div style="font-size:11px;color:var(--sell);margin-top:2px;">${escapeHtml(j.error).slice(0,200)}</div>` : '';
+      return `<tr>
+        <td><span class="badge ${badge}">${label}</span></td>
+        <td><strong>${escapeHtml(j.title)}</strong>${err}</td>
+        <td style="text-align:center;color:var(--text-muted);">${j.chunks || 0}</td>
+        <td style="color:var(--text-muted);font-size:11px;white-space:nowrap;">${escapeHtml(fmtTime(j.completed_at || j.created_at))}</td>
+      </tr>`;
+    }).join('');
+    jobsWrap.innerHTML = `<table class="rag-table" style="width:100%;"><thead><tr>
+        <th>Status</th><th>Document</th><th style="text-align:center;">Chunks</th><th>Updated</th>
+      </tr></thead><tbody>${rows}</tbody></table>`;
+  } catch (e) { /* transient — keep last view, try again next tick */ }
+}
+
+cancelBtn.addEventListener('click', async () => {
+  if (!confirm('Cancel ALL pending ingestion?\n\nThis empties the queue and deletes every document that has not finished processing (0 chunks). Completed documents are kept.')) return;
+  cancelBtn.disabled = true;
+  try {
+    const r = await fetch('/api/sources/cancel-pending', { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } });
+    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.detail || 'Cancel failed'); }
+    const d = await r.json();
+    showAlert(`Canceled. Queue purged: ${d.queue_purged}, jobs canceled: ${d.jobs_canceled}, stuck docs removed: ${d.docs_removed}.`);
+    refresh();
+  } catch (e) {
+    showAlert(e.message, 'danger');
+  } finally {
+    cancelBtn.disabled = false;
+  }
+});
+
+// Single periodic poll (one request per tick — never one-per-job).
+// Pause while the tab is hidden to avoid pointless background traffic.
+function startPolling() {
+  if (pollTimer) return;
+  pollTimer = setInterval(refresh, 3500);
+}
+function stopPolling() {
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { stopPolling(); document.getElementById('liveDot').style.color = 'var(--text-muted)'; }
+  else { refresh(); startPolling(); document.getElementById('liveDot').style.color = 'var(--buy-2)'; }
+});
+
+(async () => {
+  if (await gateAdmin()) {
+    await refresh();
+    startPolling();
+    document.getElementById('liveDot').style.color = 'var(--buy-2)';
+  }
+})();
+</script>
+{% endblock %}

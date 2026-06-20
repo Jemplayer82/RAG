@@ -114,6 +114,12 @@
   <div id="manage-pane" class="rag-tab-pane" style="display:none;">
     <section class="fc-panel">
       <span class="fc-panel__title">[ manage sources ]</span>
+      <div id="bulkBar" style="display:none;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid var(--line);">
+        <label style="display:inline-flex;align-items:center;gap:8px;font-size:12px;color:var(--foam-200);cursor:pointer;">
+          <input type="checkbox" id="selectAll"> select all
+        </label>
+        <button class="fc-btn fc-btn--danger fc-btn--sm" id="deleteSelectedBtn" disabled>Delete selected (0)</button>
+      </div>
       <div id="sourcesList">
         <div style="text-align:center;padding:20px;color:var(--text-muted);">
           <div class="rag-spinner" style="margin:0 auto 8px;"></div>
@@ -373,7 +379,15 @@ function showStatus(prefix, state, message) {
     else if (state === 'error')   { progressEl.style.display = 'none'; errorEl.textContent = message; errorEl.style.display = 'block'; successEl.style.display = 'none'; }
 }
 
+function escapeHtml(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+const STATUS_BADGE = { done: 'bg-success', complete: 'bg-success', queued: 'bg-secondary', running: 'bg-info', error: 'bg-danger' };
+const STATUS_LABEL = { done: 'done', complete: 'done', queued: 'queued', running: 'processing', error: 'error' };
+
 async function loadSources() {
+    const bulkBar = document.getElementById('bulkBar');
     try {
         // Scope the manage list to the selected target library so the delete
         // buttons can't act on a document from a different library by surprise.
@@ -383,25 +397,92 @@ async function loadSources() {
         if (response.status === 401) { window.location.href = '/login'; return; }
         const data = await response.json();
         const container = document.getElementById('sourcesList');
-        if (!data.documents || data.documents.length === 0) { container.innerHTML = '<p style="color:var(--text-muted);font-size:12px;">No user-added sources yet.</p>'; return; }
-        const validDocs = data.documents.filter(d => d.chunks > 0);
-        if (validDocs.length === 0) { container.innerHTML = '<p style="color:var(--text-muted);font-size:12px;">No user-added sources yet.</p>'; return; }
+        const docs = data.documents || [];
+        if (docs.length === 0) {
+            bulkBar.style.display = 'none';
+            container.innerHTML = '<p style="color:var(--text-muted);font-size:12px;">No user-added sources yet.</p>';
+            return;
+        }
+        // Show ALL docs (including queued / processing / error), so stuck ones
+        // are visible and selectable for bulk delete.
         let html = '<div class="list-group">';
-        for (const doc of validDocs) {
-            const label = doc.title || doc.url || doc.id;
-            const badge = doc.doc_type === 'pdf' ? 'bg-primary' : doc.doc_type === 'txt' ? 'bg-success' : 'bg-warning';
-            html += `<div class="list-group-item d-flex justify-content-between align-items-center"><div><span class="badge ${badge} me-2">${doc.doc_type}</span><strong>${label}</strong><br><small class="text-muted">Added ${doc.created_at ? doc.created_at.substring(0,10) : 'unknown'}</small></div><button class="btn btn-sm btn-outline-danger delete-source" data-id="${doc.id}">remove</button></div>`;
+        for (const doc of docs) {
+            const label = escapeHtml(doc.title || doc.url || doc.id);
+            const typeBadge = doc.doc_type === 'pdf' ? 'bg-primary' : doc.doc_type === 'txt' ? 'bg-success' : 'bg-warning';
+            const st = doc.status || (doc.chunks > 0 ? 'done' : 'queued');
+            const stBadge = STATUS_BADGE[st] || 'bg-secondary';
+            const stLabel = STATUS_LABEL[st] || st;
+            html += `<div class="list-group-item d-flex justify-content-between align-items-center">
+                <div class="d-flex align-items-center" style="gap:12px;min-width:0;">
+                    <input type="checkbox" class="src-check" data-id="${doc.id}">
+                    <div style="min-width:0;">
+                        <span class="badge ${typeBadge} me-1">${escapeHtml(doc.doc_type)}</span>
+                        <span class="badge ${stBadge} me-2">${escapeHtml(stLabel)}</span>
+                        <strong>${label}</strong>
+                        <br><small class="text-muted">Added ${doc.created_at ? doc.created_at.substring(0,10) : 'unknown'} &middot; ${doc.chunks || 0} chunk(s)</small>
+                    </div>
+                </div>
+                <button class="btn btn-sm btn-outline-danger delete-source" data-id="${doc.id}">remove</button>
+            </div>`;
         }
         html += '</div>';
         container.innerHTML = html;
+        bulkBar.style.display = 'flex';
+
         document.querySelectorAll('.delete-source').forEach(btn => {
             btn.addEventListener('click', async () => {
                 if (!confirm('Remove this source from the knowledge base?')) return;
                 await deleteSource(btn.dataset.id);
             });
         });
+        document.querySelectorAll('.src-check').forEach(cb => cb.addEventListener('change', updateBulkState));
+        document.getElementById('selectAll').checked = false;
+        updateBulkState();
     } catch (err) { console.error('Error loading sources:', err); }
 }
+
+function checkedIds() {
+    return Array.from(document.querySelectorAll('.src-check:checked')).map(cb => parseInt(cb.dataset.id));
+}
+
+function updateBulkState() {
+    const n = checkedIds().length;
+    const btn = document.getElementById('deleteSelectedBtn');
+    btn.textContent = `Delete selected (${n})`;
+    btn.disabled = n === 0;
+    const all = document.querySelectorAll('.src-check');
+    const sel = document.getElementById('selectAll');
+    sel.checked = all.length > 0 && n === all.length;
+    sel.indeterminate = n > 0 && n < all.length;
+}
+
+document.getElementById('selectAll').addEventListener('change', (e) => {
+    document.querySelectorAll('.src-check').forEach(cb => { cb.checked = e.target.checked; });
+    updateBulkState();
+});
+
+document.getElementById('deleteSelectedBtn').addEventListener('click', async () => {
+    const ids = checkedIds();
+    if (ids.length === 0) return;
+    if (!confirm(`Delete ${ids.length} selected document(s)? This removes their vectors and cannot be undone.`)) return;
+    const btn = document.getElementById('deleteSelectedBtn');
+    btn.disabled = true;
+    try {
+        const r = await fetch('/api/sources/bulk-delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('rag_token')}` },
+            body: JSON.stringify({ document_ids: ids }),
+        });
+        if (r.status === 401) { window.location.href = '/login'; return; }
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || 'Bulk delete failed');
+        showStatus('file', 'success', `✓ Deleted ${d.deleted} document(s).`);
+    } catch (err) {
+        alert('Error: ' + err.message);
+    } finally {
+        await loadSources();
+    }
+});
 
 async function deleteSource(id) {
     try {

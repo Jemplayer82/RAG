@@ -58,6 +58,7 @@ from passlib.context import CryptContext
 from pydantic import BaseModel
 from redis import Redis
 from rq import Queue
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from werkzeug.utils import secure_filename
@@ -313,6 +314,11 @@ async def admin_libraries_page(request: Request):
     return templates.TemplateResponse("admin_libraries.html", {"request": request})
 
 
+@app.get("/activity", response_class=HTMLResponse)
+async def activity_page(request: Request):
+    return templates.TemplateResponse("activity.html", {"request": request})
+
+
 # ============================================================================
 # ROUTES: Auth
 # ============================================================================
@@ -451,6 +457,26 @@ async def get_library(
     if library_id is not None:
         q = q.filter(Document.library_id == library_id)
     docs = q.order_by(Document.created_at.desc()).all()
+
+    # Attach each doc's latest ingestion status so the manage UI can show
+    # queued / processing / error rows (not just completed ones). One query,
+    # latest-wins by created_at.
+    status_by_doc: dict = {}
+    doc_ids = [d.id for d in docs]
+    if doc_ids:
+        for did, st in (
+            db.query(IngestionJob.document_id, IngestionJob.status)
+            .filter(IngestionJob.user_id == admin_id, IngestionJob.document_id.in_(doc_ids))
+            .order_by(IngestionJob.created_at.asc())
+            .all()
+        ):
+            status_by_doc[did] = st
+
+    def _doc_status(d):
+        if d.chunks and d.chunks > 0:
+            return "done"
+        return status_by_doc.get(d.id, "queued")
+
     return {
         "documents": [
             {
@@ -459,6 +485,7 @@ async def get_library(
                 "doc_type": d.doc_type,
                 "url": d.url,
                 "chunks": d.chunks,
+                "status": _doc_status(d),
                 "library_id": d.library_id,
                 "created_at": d.created_at.isoformat(),
             }
@@ -866,6 +893,159 @@ async def delete_source(
     db.commit()
     logger.info(f"[SOURCES] Deleted doc {doc_id} for user {user.id}")
     return {"status": "deleted", "id": doc_id}
+
+
+@app.get("/api/sources/jobs")
+async def list_jobs(user: User = Depends(require_admin), db: Session = Depends(get_db)):
+    """
+    Ingestion activity for the admin: status summary + recent jobs (joined to
+    their document for the title). One endpoint, polled by the /activity page —
+    a single periodic GET, never one-poll-per-job (which crashed the server).
+    """
+    rows = (
+        db.query(IngestionJob.status, func.count(IngestionJob.id))
+        .filter(IngestionJob.user_id == user.id)
+        .group_by(IngestionJob.status)
+        .all()
+    )
+    summary = {"queued": 0, "running": 0, "complete": 0, "error": 0}
+    for status_val, cnt in rows:
+        summary[status_val] = cnt
+
+    recent = (
+        db.query(IngestionJob, Document)
+        .outerjoin(Document, IngestionJob.document_id == Document.id)
+        .filter(IngestionJob.user_id == user.id)
+        .order_by(IngestionJob.created_at.desc())
+        .limit(200)
+        .all()
+    )
+    jobs = [
+        {
+            "job_id": job.id,
+            "document_id": job.document_id,
+            "title": (doc.title if doc else None) or "—",
+            "status": job.status,
+            "error": job.error_msg or "",
+            "chunks": doc.chunks if doc else 0,
+            "created_at": job.created_at.isoformat() if job.created_at else None,
+            "completed_at": job.completed_at.isoformat() if job.completed_at else None,
+        }
+        for job, doc in recent
+    ]
+    return {"summary": summary, "jobs": jobs}
+
+
+@app.post("/api/sources/bulk-delete")
+async def bulk_delete_sources(
+    data: dict,
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Delete many documents at once (Qdrant vectors + Postgres rows)."""
+    from collections import defaultdict
+
+    raw_ids = data.get("document_ids")
+    if not isinstance(raw_ids, list) or not raw_ids:
+        raise HTTPException(status_code=400, detail="document_ids must be a non-empty list")
+    try:
+        ids = [int(i) for i in raw_ids]
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="document_ids must be integers")
+
+    docs = (
+        db.query(Document)
+        .filter(Document.id.in_(ids), Document.user_id == user.id)
+        .all()
+    )
+
+    # Group doc prefixes by their backing collection so one QdrantManager handles
+    # all docs in a collection. Resolve from the library (source of truth), then
+    # fall back to the stored collection / legacy per-user name.
+    by_collection: "defaultdict[str, list]" = defaultdict(list)
+    lib_cache: dict = {}
+    for d in docs:
+        collection = d.qdrant_collection or f"user_{user.id}"
+        if d.library_id:
+            if d.library_id not in lib_cache:
+                lib = db.query(Library).filter(Library.id == d.library_id).first()
+                lib_cache[d.library_id] = lib.collection_name if lib else collection
+            collection = lib_cache[d.library_id]
+        by_collection[collection].append(f"doc_{d.id}")
+
+    failed = []
+    for collection, prefixes in by_collection.items():
+        try:
+            qm = QdrantManager(collection_name=collection)
+        except Exception as e:
+            logger.warning(f"[SOURCES] Qdrant init failed for {collection}: {e}")
+            failed.extend(prefixes)
+            continue
+        for pfx in prefixes:
+            try:
+                await asyncio.to_thread(qm.delete_document, pfx)
+            except Exception as e:
+                logger.warning(f"[SOURCES] Qdrant bulk-delete warning for {pfx}: {e}")
+                failed.append(pfx)
+
+    deleted = len(docs)
+    for d in docs:
+        db.delete(d)  # IngestionJobs cascade via Document.jobs
+    db.commit()
+    logger.info(f"[SOURCES] Bulk-deleted {deleted} doc(s) for user {user.id}")
+    return {"deleted": deleted, "failed": failed}
+
+
+@app.post("/api/sources/cancel-pending")
+async def cancel_pending(
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Cancel the whole ingestion backlog: drain the RQ queue, delete the stuck
+    0-chunk documents (their jobs cascade), and mark any remaining queued/running
+    jobs as canceled. The run_ingestion_job orphan guard makes any job already
+    mid-flight a no-op once its document is gone.
+    """
+    purged = 0
+    try:
+        q = get_ingestion_queue()
+        purged = q.count
+        q.empty()
+    except Exception as e:
+        logger.warning(f"[SOURCES] Could not empty RQ queue: {e}")
+
+    stuck = (
+        db.query(Document)
+        .filter(Document.user_id == user.id, Document.chunks == 0)
+        .all()
+    )
+    docs_removed = len(stuck)
+    for d in stuck:
+        db.delete(d)
+    db.flush()
+
+    jobs_canceled = (
+        db.query(IngestionJob)
+        .filter(
+            IngestionJob.user_id == user.id,
+            IngestionJob.status.in_(["queued", "running"]),
+        )
+        .update(
+            {
+                "status": "error",
+                "error_msg": "Canceled by admin",
+                "completed_at": datetime.utcnow(),
+            },
+            synchronize_session=False,
+        )
+    )
+    db.commit()
+    logger.info(
+        f"[SOURCES] Cancel-pending by {user.username}: queue_purged={purged} "
+        f"docs_removed={docs_removed} jobs_canceled={jobs_canceled}"
+    )
+    return {"queue_purged": purged, "docs_removed": docs_removed, "jobs_canceled": jobs_canceled}
 
 
 # ============================================================================

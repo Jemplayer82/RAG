@@ -17,9 +17,8 @@ from datetime import datetime
 from secrets_bootstrap import bootstrap_secrets
 bootstrap_secrets()
 
-import sys
 from redis import Redis
-from rq import Worker, Queue
+from rq import Queue
 from rq.worker import SimpleWorker
 
 from config import REDIS_URL
@@ -96,8 +95,15 @@ if __name__ == "__main__":
     redis_conn = get_redis_connection()
     queues = [Queue("ingestion", connection=redis_conn)]
 
-    # Use SimpleWorker on Windows (no fork support), Worker on Linux/Docker
-    WorkerClass = SimpleWorker if sys.platform == "win32" else Worker
-    worker = WorkerClass(queues, connection=redis_conn)
-    logger.info("Worker ready. Listening for jobs on queue: ingestion")
-    worker.work(with_scheduler=sys.platform != "win32")
+    # SimpleWorker (in-process, no fork) on ALL platforms.
+    #
+    # The forking Worker spawns a fresh child per job; the child never inherits
+    # the parent's _worker_embedder singleton, so EVERY job reloaded the 1.3 GB
+    # BAAI/bge-large model from scratch (~7-10 s) just to embed one doc — a ~10x
+    # slowdown on large batches. SimpleWorker runs jobs in the long-lived worker
+    # process, so the embedder loads ONCE and every later job reuses it.
+    # Trade-off: no per-job process isolation (a hard crash kills the worker and
+    # the container restarts), which is fine for this CPU embedding workload.
+    worker = SimpleWorker(queues, connection=redis_conn)
+    logger.info("Worker ready (SimpleWorker, in-process). Listening on queue: ingestion")
+    worker.work()

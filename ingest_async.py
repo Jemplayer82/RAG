@@ -251,6 +251,16 @@ def run_ingestion_job(
     try:
         logger.info(f"[WORKER] Starting ingestion: {title} (user={user_id}, type={doc_type})")
 
+        # Orphan guard: if the Document was deleted/canceled while this job sat
+        # in the queue, skip all work. Otherwise a late-running job would embed
+        # and upsert vectors for a doc that no longer exists (orphans in Qdrant)
+        # — which is exactly what bulk-delete / cancel-pending try to remove.
+        if document_id is not None:
+            with SessionLocal() as session:
+                if session.get(Document, document_id) is None:
+                    logger.info("[WORKER] Document %s gone (deleted/canceled) — skipping %s", document_id, title)
+                    return 0
+
         # Ingest based on type
         if doc_type == "pdf":
             chunks, _ = ingest_pdf(file_path, title, url)
