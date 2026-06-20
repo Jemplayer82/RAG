@@ -203,34 +203,58 @@ document.getElementById('fileUploadForm').addEventListener('submit', async (e) =
     if (!libraryId) { showStatus('file', 'error', 'Select a target library first.'); return; }
     const submitBtn = document.getElementById('fileSubmitBtn');
     submitBtn.disabled = true;
-    const results = { ok: 0, fail: 0, errors: [] };
-    try {
-        for (let i = 0; i < files.length; i++) {
-            const file = files[i];
-            const ext = file.name.split('.').pop().toLowerCase();
-            const type = ALLOWED_TYPES[ext];
-            if (!type) { results.fail++; results.errors.push(`${file.name}: unsupported extension .${ext}`); continue; }
-            const title = (files.length === 1 && titleInput.value.trim()) ? titleInput.value.trim() : file.name.replace(/\.[^.]+$/, '');
-            const label = files.length > 1 ? `(${i + 1}/${files.length}) ${title}` : title;
-            showStatus('file', 'progress', `Uploading ${label}...`);
-            setProgress('file', 5, `Uploading ${label}...`);
+
+    const queued = [];   // {job_id, title}
+    const errors = [];
+
+    // Phase 1: upload all files sequentially (fast — just saves to disk + queues job).
+    // Do NOT wait for ingestion here; that runs in the background worker.
+    for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const ext  = file.name.split('.').pop().toLowerCase();
+        const type = ALLOWED_TYPES[ext];
+        if (!type) { errors.push(`${file.name}: unsupported type .${ext}`); continue; }
+        const title = (files.length === 1 && titleInput.value.trim()) ? titleInput.value.trim() : file.name.replace(/\.[^.]+$/, '');
+        showStatus('file', 'progress', `Uploading ${i + 1}/${files.length}: ${title}…`);
+        setProgress('file', Math.round(((i + 0.5) / files.length) * 40), `Uploading ${i + 1}/${files.length}…`);
+        try {
+            const fd = new FormData();
+            fd.append('type', type); fd.append('title', title); fd.append('file', file);
+            fd.append('library_id', libraryId);
+            const resp = await fetch('/api/sources', { method: 'POST', headers: { 'Authorization': `Bearer ${localStorage.getItem('rag_token')}` }, body: fd });
+            if (resp.status === 401) { window.location.href = '/login'; return; }
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.detail || 'Upload failed');
+            queued.push({ job_id: data.job_id, title });
+        } catch (err) { errors.push(`${file.name}: ${err.message}`); }
+    }
+
+    // Phase 2: poll all queued jobs in parallel.
+    // Each poll is a lightweight GET every 2 s — running them concurrently is fine.
+    if (queued.length > 0) {
+        let done = 0;
+        showStatus('file', 'progress', `All ${queued.length} files queued — embedding…`);
+        setProgress('file', 40, `0 / ${queued.length} embedded`);
+        await Promise.all(queued.map(async ({ job_id, title }) => {
             try {
-                const formData = new FormData();
-                formData.append('type', type); formData.append('title', title); formData.append('file', file);
-                formData.append('library_id', libraryId);
-                const response = await fetch('/api/sources', { method: 'POST', headers: { 'Authorization': `Bearer ${localStorage.getItem('rag_token')}` }, body: formData });
-                if (response.status === 401) { window.location.href = '/login'; return; }
-                const data = await response.json();
-                if (!response.ok) throw new Error(data.detail || 'Upload failed');
-                if (data.job_id) { await pollJobStatus('file', data.job_id, label); }
-                results.ok++;
-            } catch (err) { results.fail++; results.errors.push(`${file.name}: ${err.message}`); }
-        }
-        document.getElementById('fileUploadForm').reset();
-        loadSources();
-        if (results.fail === 0) { showStatus('file', 'success', `✓ ${results.ok} document${results.ok === 1 ? '' : 's'} added successfully.`); }
-        else { showStatus('file', 'error', `${results.ok} succeeded, ${results.fail} failed:\n` + results.errors.join('\n')); }
-    } finally { submitBtn.disabled = false; }
+                await pollJobComplete(job_id);
+            } catch (err) {
+                errors.push(`${title}: ${err.message}`);
+            }
+            done++;
+            setProgress('file', 40 + Math.round((done / queued.length) * 60), `${done} / ${queued.length} embedded`);
+        }));
+    }
+
+    document.getElementById('fileUploadForm').reset();
+    loadSources();
+    submitBtn.disabled = false;
+    if (errors.length === 0) {
+        showStatus('file', 'success', `✓ ${queued.length} document${queued.length === 1 ? '' : 's'} added successfully.`);
+    } else {
+        const ok = queued.length - errors.filter(e => e.includes('embedded') || !e.includes('type')).length;
+        showStatus('file', 'error', `${queued.length} queued, ${errors.length} failed:\n` + errors.join('\n'));
+    }
 });
 
 document.getElementById('urlCrawlCheck').addEventListener('change', (e) => {
@@ -267,6 +291,22 @@ document.getElementById('urlForm').addEventListener('submit', async (e) => {
         loadSources();
     } catch (err) { showStatus('url', 'error', err.message); }
 });
+
+// Lightweight poll — no UI side-effects; resolves when complete, rejects on error.
+// Used by the batch uploader so multiple jobs can be polled concurrently via Promise.all.
+function pollJobComplete(jobId) {
+    return new Promise((resolve, reject) => {
+        const iv = setInterval(async () => {
+            try {
+                const r = await fetch(`/api/sources/jobs/${jobId}`, { headers: { 'Authorization': `Bearer ${localStorage.getItem('rag_token')}` } });
+                if (r.status === 401) { clearInterval(iv); window.location.href = '/login'; return; }
+                const job = await r.json();
+                if (job.status === 'complete') { clearInterval(iv); resolve(); }
+                else if (job.status === 'error') { clearInterval(iv); reject(new Error(job.error || 'Processing failed')); }
+            } catch (err) { clearInterval(iv); reject(err); }
+        }, 2000);
+    });
+}
 
 async function pollJobStatus(prefix, jobId, label) {
     const prefixLabel = label ? `${label} — ` : '';
