@@ -229,32 +229,48 @@ document.getElementById('fileUploadForm').addEventListener('submit', async (e) =
         } catch (err) { errors.push(`${file.name}: ${err.message}`); }
     }
 
-    // Phase 2: poll all queued jobs in parallel.
-    // Each poll is a lightweight GET every 2 s — running them concurrently is fine.
-    if (queued.length > 0) {
-        let done = 0;
-        showStatus('file', 'progress', `All ${queued.length} files queued — embedding…`);
-        setProgress('file', 40, `0 / ${queued.length} embedded`);
-        await Promise.all(queued.map(async ({ job_id, title }) => {
-            try {
-                await pollJobComplete(job_id);
-            } catch (err) {
-                errors.push(`${title}: ${err.message}`);
-            }
-            done++;
-            setProgress('file', 40 + Math.round((done / queued.length) * 60), `${done} / ${queued.length} embedded`);
-        }));
+    // Phase 2: feedback on completion.
+    //
+    // Single file: poll until the worker finishes embedding, then confirm.
+    // Batch (> 1 file): DON'T poll — embedding 100s of docs takes minutes to
+    // hours and firing N concurrent setInterval()s nukes the server with ~N/2
+    // req/s. Just tell the user everything is queued and let them check the
+    // Manage Sources tab as the worker chews through the queue.
+    document.getElementById('fileUploadForm').reset();
+    submitBtn.disabled = false;
+
+    if (queued.length === 1 && errors.length === 0) {
+        showStatus('file', 'progress', 'Processing…');
+        setProgress('file', 50, 'Embedding…');
+        try {
+            await pollJobComplete(queued[0].job_id);
+            setProgress('file', 100, 'Complete!');
+            showStatus('file', 'success', '✓ Document added and embedded successfully.');
+        } catch (err) {
+            showStatus('file', 'error', `Ingestion failed: ${err.message}`);
+        }
+    } else if (queued.length > 0) {
+        setProgress('file', 100, `${queued.length} queued`);
+        const uploadErrors = errors.filter(e => !e.includes(': unsupported type'));
+        if (uploadErrors.length === 0 && errors.length === 0) {
+            showStatus('file', 'success',
+                `✓ ${queued.length} file${queued.length === 1 ? '' : 's'} queued for ingestion. ` +
+                `Switch to Manage Sources to monitor progress.`);
+        } else {
+            const skipped = errors.length - uploadErrors.length;
+            const msg = [
+                queued.length ? `${queued.length} queued` : '',
+                skipped       ? `${skipped} skipped (unsupported type)` : '',
+                uploadErrors.length ? `${uploadErrors.length} upload error(s):\n${uploadErrors.join('\n')}` : '',
+            ].filter(Boolean).join(' · ');
+            showStatus('file', uploadErrors.length ? 'error' : 'success', msg);
+        }
+    } else {
+        // Everything failed before even uploading
+        showStatus('file', 'error', `All uploads failed:\n` + errors.join('\n'));
     }
 
-    document.getElementById('fileUploadForm').reset();
     loadSources();
-    submitBtn.disabled = false;
-    if (errors.length === 0) {
-        showStatus('file', 'success', `✓ ${queued.length} document${queued.length === 1 ? '' : 's'} added successfully.`);
-    } else {
-        const ok = queued.length - errors.filter(e => e.includes('embedded') || !e.includes('type')).length;
-        showStatus('file', 'error', `${queued.length} queued, ${errors.length} failed:\n` + errors.join('\n'));
-    }
 });
 
 document.getElementById('urlCrawlCheck').addEventListener('change', (e) => {
