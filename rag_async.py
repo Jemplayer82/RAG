@@ -200,6 +200,16 @@ async def query_async(
             page_url_with_anchor = f"{page_url}#:~:text={quote(excerpt_raw)}"
         else:
             page_url_with_anchor = page_url
+
+        # Derive integer document ID from the stored doc_id_prefix ("doc_42" → 42)
+        doc_id_prefix = meta.get("doc_id_prefix", "")
+        document_id = None
+        if doc_id_prefix.startswith("doc_"):
+            try:
+                document_id = int(doc_id_prefix[4:])
+            except ValueError:
+                pass
+
         source_citations.append({
             "index": i,
             "citation": citation,
@@ -208,6 +218,7 @@ async def query_async(
             "page_url": page_url,
             "anchor_url": page_url_with_anchor,
             "excerpt": excerpt_raw,
+            "document_id": document_id,
         })
 
     prompt = RAG_PROMPT_TEMPLATE.format(
