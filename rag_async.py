@@ -61,22 +61,28 @@ def _get_embedder() -> SentenceTransformer:
 # RETRIEVAL: Semantic search + BM25 re-ranking (per user)
 # ============================================================================
 
-def _retrieve_sources_sync(question: str, collection_name: str, k: int = TOP_K) -> List[Dict]:
+def _retrieve_sources_sync(question: str, collection_names: List[str], k: int = TOP_K) -> List[Dict]:
     """
-    Sync retrieval: semantic search in Qdrant + BM25 re-ranking.
+    Sync retrieval across one or more Qdrant collections.
+    Searches each collection independently with top_k, merges the candidate
+    pool, then BM25 re-ranks the combined set.
     Wrapped in asyncio.to_thread() for async use.
     """
     embedder = _get_embedder()
-    qm = QdrantManager(collection_name=collection_name)
-
-    # Embed query
     query_vector = embedder.encode(question, convert_to_tensor=False).tolist()
 
-    # Semantic search from Qdrant
-    raw_results = qm.search(query_vector, top_k=k)
+    # Gather candidates from every collection
+    raw_results: List[Dict] = []
+    for coll in collection_names:
+        try:
+            qm = QdrantManager(collection_name=coll)
+            hits = qm.search(query_vector, top_k=k)
+            raw_results.extend(hits)
+        except Exception as e:
+            logger.warning(f"[RAG] Search failed for collection {coll}: {e}")
 
     if not raw_results:
-        logger.warning(f"[RAG] No results in collection {collection_name}")
+        logger.warning(f"[RAG] No results across collections: {collection_names}")
         return []
 
     # BM25 re-ranking, fused with the semantic score.
@@ -105,7 +111,7 @@ def _retrieve_sources_sync(question: str, collection_name: str, k: int = TOP_K) 
         top_indices = [0]
 
     sources = [raw_results[i] for i in top_indices if i < len(raw_results)]
-    logger.info(f"[RAG] Retrieved {len(sources)} sources from {collection_name}")
+    logger.info(f"[RAG] Retrieved {len(sources)} sources from {len(collection_names)} collection(s)")
     return sources
 
 
@@ -146,7 +152,7 @@ async def _call_llm_async(prompt: str) -> str:
 
 async def query_async(
     question: str,
-    collection_name: str,
+    collection_names: List[str],
     chat_history: Optional[List[Dict]] = None
 ) -> Dict:
     """
@@ -154,16 +160,16 @@ async def query_async(
 
     Args:
         question: User's natural language question
-        collection_name: Qdrant collection to search (the selected library)
+        collection_names: One or more Qdrant collections to search
         chat_history: Previous messages (optional, for context)
 
     Returns:
         Dict with keys: answer, sources, metadata
     """
-    logger.info(f"[RAG] Query against {collection_name}: {question[:80]}")
+    logger.info(f"[RAG] Query across {collection_names}: {question[:80]}")
 
     # Retrieve in thread pool (blocking I/O)
-    sources = await asyncio.to_thread(_retrieve_sources_sync, question, collection_name, TOP_K)
+    sources = await asyncio.to_thread(_retrieve_sources_sync, question, collection_names, TOP_K)
 
     if not sources:
         return {

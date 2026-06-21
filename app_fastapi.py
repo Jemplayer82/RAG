@@ -213,7 +213,8 @@ class Token(BaseModel):
 class ChatRequest(BaseModel):
     question: str
     chat_history: Optional[list] = []
-    library_id: Optional[int] = None
+    library_id: Optional[int] = None      # legacy single-select (kept for compat)
+    library_ids: Optional[list] = None    # multi-select: takes priority when set
 
 
 class LibraryCreate(BaseModel):
@@ -406,15 +407,23 @@ async def get_current_model(user: User = Depends(get_current_user), db: Session 
 
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    """Authenticated chat — queries one selected library's collection."""
+    """Authenticated chat — queries one or more library collections."""
     if not req.question.strip():
         raise HTTPException(status_code=400, detail="Question cannot be empty")
     admin_id = get_admin_user_id(db)
 
-    # Resolve which library (collection) to search. Explicit choice wins;
-    # otherwise default to the oldest library (the adopted original corpus).
-    if req.library_id is not None:
+    # Resolve collection names.
+    # Priority: library_ids (multi) > library_id (single) > oldest library (default).
+    collection_names: list[str] = []
+
+    if req.library_ids:
+        ids = [int(i) for i in req.library_ids if i is not None]
+        for lid in ids:
+            lib = _get_admin_library(db, admin_id, lid)
+            collection_names.append(lib.collection_name)
+    elif req.library_id is not None:
         lib = _get_admin_library(db, admin_id, req.library_id)
+        collection_names = [lib.collection_name]
     else:
         lib = (
             db.query(Library)
@@ -422,13 +431,17 @@ async def chat(req: ChatRequest, user: User = Depends(get_current_user), db: Ses
             .order_by(Library.created_at.asc())
             .first()
         )
-    if not lib:
+        if not lib:
+            raise HTTPException(status_code=503, detail="No libraries configured yet.")
+        collection_names = [lib.collection_name]
+
+    if not collection_names:
         raise HTTPException(status_code=503, detail="No libraries configured yet.")
 
     try:
         result = await query_async(
             question=req.question,
-            collection_name=lib.collection_name,
+            collection_names=collection_names,
             chat_history=req.chat_history
         )
         return result

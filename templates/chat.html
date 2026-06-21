@@ -13,7 +13,18 @@
       <div style="padding:12px 16px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;flex-shrink:0;gap:10px;">
         <div style="display:flex;align-items:center;gap:8px;min-width:0;">
           <span style="font-size:9px;letter-spacing:1.5px;color:var(--text-muted);text-transform:uppercase;white-space:nowrap;">Library</span>
-          <select class="fc-select" id="chatLibrarySelect" style="font-size:11px;padding:4px 8px;max-width:240px;"></select>
+          <!-- Multi-library picker -->
+          <div style="position:relative;" id="libPickerWrap">
+            <button type="button" id="libPickerBtn"
+                    style="font-size:11px;padding:4px 10px;background:var(--surface-well);border:1px solid var(--line);border-radius:var(--radius-sm);color:var(--foam-200);cursor:pointer;display:flex;align-items:center;gap:6px;white-space:nowrap;max-width:280px;overflow:hidden;">
+              <span id="libPickerLabel" style="overflow:hidden;text-overflow:ellipsis;">Loading…</span>
+              <span style="opacity:.5;font-size:9px;flex-shrink:0;">▾</span>
+            </button>
+            <div id="libPickerDropdown"
+                 style="display:none;position:absolute;top:calc(100% + 4px);left:0;z-index:200;background:var(--surface-panel);border:1px solid var(--line);border-radius:var(--radius-sm);min-width:220px;padding:4px 0;box-shadow:0 4px 20px rgba(0,0,0,.5);max-height:280px;overflow-y:auto;">
+              <div id="libPickerItems"></div>
+            </div>
+          </div>
         </div>
         <button class="fc-btn fc-btn--ghost fc-btn--sm" id="clearChatBtn">clear</button>
       </div>
@@ -100,7 +111,7 @@ document.getElementById('queryForm').addEventListener('submit', async (e) => {
                 'Content-Type': 'application/json',
                 'Authorization': 'Bearer ' + localStorage.getItem('rag_token')
             },
-            body: JSON.stringify({ question, library_id: currentChatLibraryId(), chat_history: (window.chatLog || []).slice(-6) })
+            body: JSON.stringify({ question, library_ids: currentChatLibraryIds(), chat_history: (window.chatLog || []).slice(-6) })
         });
 
         if (response.status === 401) { localStorage.removeItem('rag_token'); window.location.href = '/login'; return; }
@@ -208,28 +219,80 @@ document.getElementById('clearChatBtn').addEventListener('click', () => {
     document.getElementById('questionInput').focus();
 });
 
-// ---- Library selector (sticky; one library per question) ----
-const chatLibrarySelect = document.getElementById('chatLibrarySelect');
-function currentChatLibraryId() {
-    const v = chatLibrarySelect.value;
-    return v ? parseInt(v) : null;
+// ---- Multi-library picker ----
+const libPickerBtn      = document.getElementById('libPickerBtn');
+const libPickerDropdown = document.getElementById('libPickerDropdown');
+const libPickerItems    = document.getElementById('libPickerItems');
+const libPickerLabel    = document.getElementById('libPickerLabel');
+let _allLibs = [];
+
+function currentChatLibraryIds() {
+    return Array.from(libPickerItems.querySelectorAll('input[type=checkbox]:checked'))
+                .map(cb => parseInt(cb.value));
 }
+
+function _updatePickerLabel() {
+    const checked = libPickerItems.querySelectorAll('input[type=checkbox]:checked');
+    if (checked.length === 0) {
+        libPickerLabel.textContent = 'none selected';
+    } else if (checked.length === 1) {
+        libPickerLabel.textContent = checked[0].dataset.name;
+    } else {
+        libPickerLabel.textContent = `${checked.length} libraries`;
+    }
+    // Persist as JSON array of IDs
+    const ids = Array.from(checked).map(cb => cb.value);
+    localStorage.setItem('rag_library_ids', JSON.stringify(ids));
+}
+
+function _buildPickerItems(libs) {
+    let savedIds = [];
+    try { savedIds = JSON.parse(localStorage.getItem('rag_library_ids') || '[]'); } catch (e) {}
+    // Legacy: migrate single rag_library_id to array
+    if (!savedIds.length) {
+        const legacy = localStorage.getItem('rag_library_id');
+        if (legacy) savedIds = [legacy];
+    }
+
+    libPickerItems.innerHTML = libs.map(l => {
+        const checked = savedIds.length === 0 || savedIds.includes(String(l.id)) ? 'checked' : '';
+        return `<label style="display:flex;align-items:center;gap:8px;padding:6px 14px;cursor:pointer;font-size:12px;color:var(--foam-200);white-space:nowrap;">
+          <input type="checkbox" value="${l.id}" data-name="${escapeHtml(l.name)}" ${checked}>
+          ${escapeHtml(l.name)}
+        </label>`;
+    }).join('');
+
+    libPickerItems.querySelectorAll('input[type=checkbox]').forEach(cb => {
+        cb.addEventListener('change', () => { _updatePickerLabel(); resetChat(); });
+    });
+    _updatePickerLabel();
+}
+
 async function loadChatLibraries() {
     try {
         const resp = await fetch('/api/libraries', { headers: { 'Authorization': 'Bearer ' + localStorage.getItem('rag_token') } });
         if (!resp.ok) return;
         const data = await resp.json();
-        const libs = data.libraries || [];
-        chatLibrarySelect.innerHTML = libs.map(l => `<option value="${l.id}">${escapeHtml(l.name)}</option>`).join('');
-        const saved = localStorage.getItem('rag_library_id');
-        if (saved && libs.some(l => String(l.id) === saved)) chatLibrarySelect.value = saved;
-        else if (libs.length) localStorage.setItem('rag_library_id', chatLibrarySelect.value);
+        _allLibs = data.libraries || [];
+        if (!_allLibs.length) { libPickerLabel.textContent = 'no libraries'; return; }
+        _buildPickerItems(_allLibs);
     } catch (e) { console.error('Failed to load libraries:', e); }
 }
-chatLibrarySelect.addEventListener('change', () => {
-    localStorage.setItem('rag_library_id', chatLibrarySelect.value);
-    resetChat();  // a fresh library means a fresh conversation
+
+// Toggle dropdown open/close
+libPickerBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const open = libPickerDropdown.style.display !== 'none';
+    libPickerDropdown.style.display = open ? 'none' : 'block';
 });
+
+// Close on click outside
+document.addEventListener('click', (e) => {
+    if (!document.getElementById('libPickerWrap').contains(e.target)) {
+        libPickerDropdown.style.display = 'none';
+    }
+});
+
 loadChatLibraries();
 
 // ---- Model selector ----
