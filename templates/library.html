@@ -16,12 +16,18 @@
     </div>
   </div>
 
-  <!-- Library filter -->
-  <div class="fc-field" style="max-width:300px;margin-bottom:18px;">
-    <label class="fc-field__label" for="libraryFilter">Library</label>
-    <select class="fc-select" id="libraryFilter">
-      <option value="">All libraries</option>
-    </select>
+  <!-- Filters row -->
+  <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin-bottom:18px;">
+    <div class="fc-field" style="min-width:180px;flex:0 0 auto;">
+      <label class="fc-field__label" for="libraryFilter">Library</label>
+      <select class="fc-select" id="libraryFilter">
+        <option value="">All libraries</option>
+      </select>
+    </div>
+    <div class="fc-field" style="flex:1;min-width:200px;max-width:420px;">
+      <label class="fc-field__label" for="docSearch">Search</label>
+      <input class="fc-input" type="search" id="docSearch" placeholder="Filter by title…" autocomplete="off">
+    </div>
   </div>
 
   <!-- Feedback -->
@@ -106,7 +112,10 @@ function renderTable() {
     document.getElementById('emptyBox').classList.add('d-none');
     document.getElementById('tableWrap').classList.remove('d-none');
 
-    const sorted = [...documents].sort((a, b) => {
+    const q = (document.getElementById('docSearch').value || '').trim().toLowerCase();
+    const visible = q ? documents.filter(d => (d.title || '').toLowerCase().includes(q)) : documents;
+
+    const sorted = [...visible].sort((a, b) => {
         let av = a[sortColumn], bv = b[sortColumn];
         if (sortColumn === 'chunks') { av = av || 0; bv = bv || 0; }
         else { av = String(av ?? '').toLowerCase(); bv = String(bv ?? '').toLowerCase(); }
@@ -194,6 +203,7 @@ async function loadLibrary() {
 }
 
 document.getElementById('libraryFilter').addEventListener('change', loadLibrary);
+document.getElementById('docSearch').addEventListener('input', renderTable);
 
 document.querySelectorAll('th[data-sort]').forEach(h => {
     h.addEventListener('click', () => {
