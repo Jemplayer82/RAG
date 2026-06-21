@@ -736,7 +736,7 @@ async def add_source(
                 "same_domain_only": same_domain_only,
                 "respect_robots": respect_robots,
             },
-            job_timeout=600,
+            job_timeout=1800,
             result_ttl=3600,
         )
         job_record.rq_job_id = rq_job.id
