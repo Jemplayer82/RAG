@@ -33,8 +33,17 @@
       </div>
       <form id="fileUploadForm">
         <div class="fc-field" style="margin-bottom:13px;">
-          <label class="fc-field__label" for="fileInput">Files</label>
-          <input class="fc-input" type="file" id="fileInput" accept=".pdf,.txt,.doc,.docx" multiple required>
+          <label class="fc-field__label">Files</label>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+            <label class="fc-btn fc-btn--ghost fc-btn--sm" style="cursor:pointer;margin:0;">
+              Select files
+              <input type="file" id="fileInput" accept=".pdf,.txt,.doc,.docx" multiple style="display:none;">
+            </label>
+            <span style="font-size:11px;color:var(--text-muted);">or</span>
+            <button type="button" class="fc-btn fc-btn--ghost fc-btn--sm" id="folderBtn">Select folder</button>
+            <input type="file" id="folderInput" webkitdirectory multiple style="display:none;">
+          </div>
+          <div id="selectionPreview" style="margin-top:8px;font-size:11px;color:var(--foam-200);min-height:16px;"></div>
         </div>
         <div class="fc-field" style="margin-bottom:18px;" id="singleTitleWrapper">
           <label class="fc-field__label" for="fileTitleInput">Document title <span style="font-size:10px;letter-spacing:0;color:var(--text-muted);">single file only</span></label>
@@ -199,11 +208,54 @@ loadLibrariesIntoSelect();
 
 const ALLOWED_TYPES = { pdf: 'pdf', txt: 'txt', doc: 'doc', docx: 'docx' };
 
+// ---- Folder / file selection ----
+let activeFolderFiles = null; // set when folder is chosen; null when using file picker
+
+const folderInput   = document.getElementById('folderInput');
+const fileInput     = document.getElementById('fileInput');
+const folderBtn     = document.getElementById('folderBtn');
+const selPreview    = document.getElementById('selectionPreview');
+const titleWrapper  = document.getElementById('singleTitleWrapper');
+
+folderBtn.addEventListener('click', () => folderInput.click());
+
+folderInput.addEventListener('change', () => {
+    const all = Array.from(folderInput.files);
+    const supported = all.filter(f => {
+        const ext = f.name.split('.').pop().toLowerCase();
+        return ALLOWED_TYPES[ext];
+    });
+    const skipped = all.length - supported.length;
+    activeFolderFiles = supported.length ? supported : null;
+    fileInput.value = '';
+
+    if (!supported.length) {
+        selPreview.textContent = 'No supported files found in that folder.';
+        titleWrapper.style.display = 'none';
+        return;
+    }
+
+    // Derive folder name from the first file's relative path
+    const firstPath = (all[0].webkitRelativePath || all[0].name);
+    const folderName = firstPath.includes('/') ? firstPath.split('/')[0] : '(folder)';
+    selPreview.textContent = `${supported.length} file${supported.length === 1 ? '' : 's'} from "${folderName}"` +
+        (skipped ? ` · ${skipped} unsupported skipped` : '');
+    titleWrapper.style.display = 'none'; // title field not applicable for folder batch
+});
+
+fileInput.addEventListener('change', () => {
+    activeFolderFiles = null;
+    folderInput.value = '';
+    const n = fileInput.files.length;
+    if (n === 0) { selPreview.textContent = ''; titleWrapper.style.display = ''; return; }
+    selPreview.textContent = n === 1 ? fileInput.files[0].name : `${n} files selected`;
+    titleWrapper.style.display = n === 1 ? '' : 'none';
+});
+
 document.getElementById('fileUploadForm').addEventListener('submit', async (e) => {
     e.preventDefault();
-    const fileInput  = document.getElementById('fileInput');
     const titleInput = document.getElementById('fileTitleInput');
-    const files = Array.from(fileInput.files);
+    const files = activeFolderFiles || Array.from(fileInput.files);
     if (files.length === 0) return;
     const libraryId = currentLibraryId();
     if (!libraryId) { showStatus('file', 'error', 'Select a target library first.'); return; }
@@ -243,6 +295,9 @@ document.getElementById('fileUploadForm').addEventListener('submit', async (e) =
     // req/s. Just tell the user everything is queued and let them check the
     // Manage Sources tab as the worker chews through the queue.
     document.getElementById('fileUploadForm').reset();
+    activeFolderFiles = null;
+    selPreview.textContent = '';
+    titleWrapper.style.display = '';
     submitBtn.disabled = false;
 
     if (queued.length === 1 && errors.length === 0) {
