@@ -9,10 +9,11 @@
 ## `[ what it does ]`
 
 - Organize documents into **named, isolated libraries** — keep unrelated corpora separate (e.g. "Spinal Cord Injury", "Jones Act Cases")
-- Upload PDFs, text files, or web URLs into any library you choose
-- Chat with an AI assistant that searches one library at a time, answering questions using only its documents, with source citations
-- Admin-managed libraries — only the admin adds, removes, or creates collections; all authenticated users can pick a library and query it
+- Upload PDFs, text files, or web URLs into any library — or select an entire folder for batch ingestion
+- Chat with an AI assistant that searches **one or more libraries simultaneously**, answering questions using only their documents, with clickable source citations and one-click document download
+- Admin-managed libraries — only the admin adds, removes, or creates collections; all authenticated users can pick any combination of libraries and query across them
 - Switch between local (Ollama) and cloud LLM providers (OpenAI, Anthropic, or any OpenAI-compatible endpoint) from the admin UI
+- **MCP server included** — query and manage the knowledge base directly from Claude via [`rag-mcp`](https://github.com/Jemplayer82/rag-mcp)
 
 ---
 
@@ -181,6 +182,31 @@ $ cp .env.example .env
 # Requires local PostgreSQL, Qdrant, and Redis
 $ uvicorn app_fastapi:app --reload --port 8000
 ```
+
+---
+
+## `[ mcp server ]`
+
+The companion [`rag-mcp`](https://github.com/Jemplayer82/rag-mcp) repo ships a containerized stdio MCP server that wraps this API. Connect it to Claude Desktop or Claude Code to query the knowledge base, ingest local files, and manage libraries without opening the web UI.
+
+```json
+{
+  "mcpServers": {
+    "rag": {
+      "command": "docker",
+      "args": [
+        "run", "-i", "--rm",
+        "-e", "RAG_BASE_URL=http://YOUR_HOST:8000",
+        "-e", "RAG_USERNAME=admin",
+        "-e", "RAG_PASSWORD=yourpassword",
+        "ghcr.io/jemplayer82/rag-mcp:latest"
+      ]
+    }
+  }
+}
+```
+
+See [github.com/Jemplayer82/rag-mcp](https://github.com/Jemplayer82/rag-mcp) for full setup, all 7 tools, and smoke-test instructions.
 
 ---
 
